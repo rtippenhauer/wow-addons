@@ -2,7 +2,7 @@
 ## Title: |cffe6a23cTippenhauer Works|r - Curiosities
 ## Notes: Delve curiosities, chests and troves: list, party sync, map pins and a guide arrow.
 ## Author: rtippenhauer (Tippenhauer Works)
-## Version: 1.0.2
+## Version: 1.0.3
 ## X-Website: https://github.com/rtippenhauer/wow-addons
 ## Category: Tippenhauer Works
 ## Group: TippWorks-Core

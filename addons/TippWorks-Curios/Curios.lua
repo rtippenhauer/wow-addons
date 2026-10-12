@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.2"
+ns.VERSION = "1.0.3"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -48,6 +48,9 @@ local CURIO_OBJECT_IDS = { [455914] = { "Curiosity", "Mislaid Curiosity" } }
 -- name becomes readable (usually when you get closer), never synced.
 local UNKNOWN, UNKNOWN_NAME = "Unknown", "Unnamed object (?)"
 local IGNORED_VIGNETTES = { [6116] = true } -- Delver's Supplies
+-- Markers with no info that are known to be curiosities (seen in game: every
+-- 5482 sat exactly on a Mislaid Curiosity, The Darkway, Oct 12 2026).
+local VIGNETTE_KINDS = { [5482] = { "Curiosity", "Mislaid Curiosity" } }
 
 -- A Boon with no known curiosity nearby: the game never showed this one, so
 -- it's added where you stood, already picked up. Local only, never synced.
@@ -168,14 +171,20 @@ end
 -- or name+position on two different floor maps of the same delve. Same name
 -- at the same spot in the world = the same curiosity. An unnamed object at
 -- the same spot as a named one is the same thing too.
-local function FindSame(name, map, x, y, kind)
+-- Two different object GUIDs that this client sees itself are two curiosities,
+-- even side by side (The Darkway has a pair ~6 yd apart); they only fold
+-- together as per-player copies at the very same spot.
+local COPY_YARDS = 2
+local function FindSame(name, map, x, y, kind, ownGuid)
     local wx, wy = World(map, x, y)
     for _, k in ipairs(run.order) do
         local it = run.items[k]
         if it.name == name or kind == UNKNOWN or it.kind == UNKNOWN then
+            local both = ownGuid and it.ownGuid
+            local yards, mapDelta = both and COPY_YARDS or MERGE_YARDS, both and 0.002 or 0.01
             if wx and it.wx then
-                if math.sqrt((wx - it.wx) ^ 2 + (wy - it.wy) ^ 2) <= MERGE_YARDS then return it end
-            elseif it.map == map and math.abs(it.x - x) < 0.01 and math.abs(it.y - y) < 0.01 then
+                if math.sqrt((wx - it.wx) ^ 2 + (wy - it.wy) ^ 2) <= yards then return it end
+            elseif it.map == map and math.abs(it.x - x) < mapDelta and math.abs(it.y - y) < mapDelta then
                 return it
             end
         end
@@ -183,11 +192,13 @@ local function FindSame(name, map, x, y, kind)
 end
 
 local quietMerge = false
-local function AddItem(key, kind, name, map, x, y)
+-- ownGuid: key is an object GUID from this client's own scan (not a party
+-- member's message, not a name+position key).
+local function AddItem(key, kind, name, map, x, y, ownGuid)
     run.alias = run.alias or {}
     local it = run.items[run.alias[key] or key]
     if it then return it, false end
-    local same = FindSame(name, map, x, y, kind)
+    local same = FindSame(name, map, x, y, kind, ownGuid)
     if same and same.kind == UNKNOWN and kind ~= UNKNOWN then
         -- The unnamed object turned out to be this: take the real name.
         run.alias[key] = same.key
@@ -200,7 +211,7 @@ local function AddItem(key, kind, name, map, x, y)
             name, key:find("@", 1, true) and "name+position" or "object GUID") end
         return same, false
     end
-    it = { key = key, kind = kind, name = name, map = map, x = x, y = y, looted = {} }
+    it = { key = key, kind = kind, name = name, map = map, x = x, y = y, looted = {}, ownGuid = ownGuid or nil }
     it.wx, it.wy = World(map, x, y)
     run.items[key] = it
     run.order[#run.order + 1] = key
@@ -296,7 +307,7 @@ local function NoteUnnamed(vid, pos)
     if run.markers[k] then return end
     run.markers[k] = true
     ns.Log("MARKER", "<no info from the game> | vignette id %s | %.1f, %.1f | %s", tostring(vid), pos.x * 100, pos.y * 100,
-        IGNORED_VIGNETTES[vid] and "ignored" or ("listed as " .. UNKNOWN_NAME))
+        IGNORED_VIGNETTES[vid] and "ignored" or ("listed as " .. (VIGNETTE_KINDS[vid] and VIGNETTE_KINDS[vid][2] or UNKNOWN_NAME)))
 end
 
 local function MarkerPos(guid, map)
@@ -324,7 +335,7 @@ function ns.CurioScanReport()
         else
             local vid = VignetteID(guid)
             ns.Print(("  <no info from the game> | vignette id %s | %s | %s"):format(tostring(vid),
-                IGNORED_VIGNETTES[vid] and "ignored" or "listed as unnamed", where))
+                IGNORED_VIGNETTES[vid] and "ignored" or VIGNETTE_KINDS[vid] and ("tracked as " .. VIGNETTE_KINDS[vid][1]) or "listed as unnamed", where))
         end
     end
 end
@@ -348,10 +359,12 @@ local function Scan()
             break
         end
     end
-    local function Track(key, kind, name, pos)
-        local it, new = AddItem(key, kind, name, map, pos.x, pos.y)
-        if kind == UNKNOWN and it.kind ~= UNKNOWN then
-            -- Unnamed duplicate of a marker we already know by name: don't count it as a copy.
+    -- weak: a marker the game gave no info for. When it sits on a curiosity we
+    -- already know, it's the same thing shown twice - not another copy.
+    local function Track(key, kind, name, pos, weak)
+        local ownGuid = not weak and not key:find("@", 1, true)
+        local it, new = AddItem(key, kind, name, map, pos.x, pos.y, ownGuid)
+        if weak and it.key ~= key then
             seen[it.key] = true
             return
         end
@@ -362,7 +375,7 @@ local function Scan()
         if new then
             changed = true
             ns.Log("CURIO", "found %s at %.1f,%.1f (key: %s)", it.name, pos.x * 100, pos.y * 100,
-                kind == UNKNOWN and "no info from the game" or key:find("@", 1, true) and "name+position, GUID hidden" or "object GUID")
+                weak and ("no info from the game, marker " .. key:match("^[^@]*")) or key:find("@", 1, true) and "name+position, GUID hidden" or "object GUID")
             if Syncable(it) then Broadcast(Encode(it, "F")) end
         end
         if it.gone then
@@ -391,8 +404,11 @@ local function Scan()
             -- WoW reports something here but says nothing about it.
             local vid = VignetteID(guid)
             NoteUnnamed(vid, pos)
-            if not IGNORED_VIGNETTES[vid] then
-                Track(("unnamed@%.3f,%.3f"):format(pos.x, pos.y), UNKNOWN, UNKNOWN_NAME, pos)
+            local known = VIGNETTE_KINDS[vid]
+            if known then
+                Track(("%s@%.3f,%.3f"):format(known[2], pos.x, pos.y), known[1], known[2], pos, true)
+            elseif not IGNORED_VIGNETTES[vid] then
+                Track(("unnamed@%.3f,%.3f"):format(pos.x, pos.y), UNKNOWN, UNKNOWN_NAME, pos, true)
             end
         end
     end
@@ -620,6 +636,13 @@ local function OnLootMessage(msg)
         return
     end
     if not (msg:find("^You receive") and msg:find("Boon of", 1, true)) then return end
+    -- One pickup can send two Boon lines, sometimes after the pickup was already
+    -- counted (marker vanished next to you): those aren't new curiosities -
+    -- and must not be credited to a curiosity next to it.
+    if lastMine and GetTime() - lastMine < 3 then
+        ns.Log("CURIO", "got a Boon - already counted (pickup %.1fs ago)", GetTime() - lastMine)
+        return
+    end
     local best, bestD
     for _, k in ipairs(run.order) do
         local it = run.items[k]
@@ -631,12 +654,6 @@ local function OnLootMessage(msg)
     if best then
         ns.Log("CURIO", "%s at %.1f,%.1f: got a Boon %d yd from it -> YOUR pickup", best.name, best.x * 100, best.y * 100, bestD)
         MarkLooted(best, me)
-        return
-    end
-    -- One pickup can send two Boon lines, sometimes after the pickup was already
-    -- counted (marker vanished next to you): those aren't new curiosities.
-    if lastMine and GetTime() - lastMine < 10 then
-        ns.Log("CURIO", "got a Boon - already counted (pickup %.1fs ago)", GetTime() - lastMine)
         return
     end
     for _, k in ipairs(run.order) do
