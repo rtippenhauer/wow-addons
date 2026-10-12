@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.4"
+ns.VERSION = "1.0.5"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -335,9 +335,12 @@ end
 
 -- /tw curios scan: everything the game is showing right now.
 function ns.CurioScanReport()
+    local function Out(s) ns.Print(s); ns.Log("SCAN", "%s", s) end -- chat + log (read after /reload)
     local map = C_Map.GetBestMapForUnit("player")
     local list = C_VignetteInfo and C_VignetteInfo.GetVignettes() or {}
-    ns.Print(("map %s, in delve: %s, markers visible: %d"):format(tostring(map), tostring(inDelve), #list))
+    local me = map and C_Map.GetPlayerMapPosition(map, "player")
+    Out(("map %s, in delve: %s, markers visible: %d, you at %s"):format(tostring(map), tostring(inDelve), #list,
+        me and ("%.1f, %.1f"):format(me.x * 100, me.y * 100) or "?"))
     for _, guid in ipairs(list) do
         local info = C_VignetteInfo.GetVignetteInfo(guid)
         local pos = map and MarkerPos(guid, map)
@@ -345,11 +348,11 @@ function ns.CurioScanReport()
         if Readable(info) and info then
             local kind = Kind(info)
             local secret = not Readable(info.name)
-            ns.Print(("  %s | atlas %s | %s | %s"):format(secret and "<hidden by the game>" or tostring(info.name),
+            Out(("  %s | atlas %s | %s | %s"):format(secret and "<hidden by the game>" or tostring(info.name),
                 tostring(info.atlasName), kind and ("tracked as " .. kind) or "not tracked", where))
         else
             local vid = VignetteID(guid)
-            ns.Print(("  <no info from the game> | vignette id %s | %s | %s"):format(tostring(vid),
+            Out(("  <no info from the game> | vignette id %s | %s | %s"):format(tostring(vid),
                 IGNORED_VIGNETTES[vid] and "ignored" or VIGNETTE_KINDS[vid] and ("tracked as " .. VIGNETTE_KINDS[vid][1]) or "listed as unnamed", where))
         end
     end
@@ -645,14 +648,63 @@ function ns.DundunSpotted(it)
 end
 
 -- "Dundun is hiding..." and the like: he's in this delve, no position yet.
-local function DundunAnnounced(text, sender)
-    local t = Readable(text) and type(text) == "string" and text:lower() or ""
-    local s = Readable(sender) and type(sender) == "string" and sender:lower() or ""
-    if not (s == "dundun" or (t:find("dundun", 1, true) and t:find("hid", 1, true))) then return end
+-- Any message that mentions him, from chat, the centre-screen boss text, system
+-- or info messages. It can arrive while you're zoning in, before the delve run
+-- has started: then it's held and applied when the run starts.
+local pendingDundun
+local function DundunAnnounced(event, text, sender)
+    local t = Readable(text) and type(text) == "string" and text or ""
+    local s = Readable(sender) and type(sender) == "string" and sender or ""
+    if not (s:lower() == "dundun" or t:lower():find("dundun", 1, true)) then return end
+    local said = (t ~= "" and t or s):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    if not (run and inDelve) then
+        if IsInInstance() then pendingDundun = { at = GetTime(), event = event, text = said } end
+        return
+    end
+    run.dundunHeard = run.dundunHeard or {}
+    if not run.dundunHeard[said] then -- every distinct line once, to learn where it comes from
+        run.dundunHeard[said] = true
+        ns.Log("DUNDUN", "%s: %s", event, said)
+    end
     if run.dundunAnnounced then return end
     run.dundunAnnounced = true
-    ns.Log("DUNDUN", "announced: %s", t ~= "" and t or s)
     if not run.dundunAlerted then Alert("|cffff8000Dundun is in this delve!|r Watch for his marker - the arrow will point to him.") end
+end
+
+-- Units (your target, mouseover, nameplates): Dundun can be targetable with no
+-- map marker. Whether the game lets addons read a delve unit's name or id is
+-- logged once per run, so a /reload afterwards shows what's possible.
+local function UnitIsDundun(unit, why)
+    if not run or not inDelve then return end
+    local okN, name = pcall(UnitName, unit)
+    local okG, guid = pcall(UnitGUID, unit)
+    name = okN and Readable(name) and type(name) == "string" and name or nil
+    guid = okG and Readable(guid) and type(guid) == "string" and guid or nil
+    if not name and not guid then
+        run.unitNotes = run.unitNotes or {}
+        if okN and okG and not run.unitNotes[why] and UnitExists(unit) then
+            run.unitNotes[why] = true
+            ns.Log("DUNDUN", "%s: the game hides this unit's name and id from addons", why)
+        end
+        return
+    end
+    local id = guid and tonumber(guid:match("^Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)%-"))
+    if not ((name and name:lower() == "dundun") or id == DUNDUN_NPC) then return end
+    if not run.dundunUnit then
+        run.dundunUnit = true
+        ns.Log("DUNDUN", "seen as a unit (%s): name %s, id %s", why, tostring(name), tostring(id))
+    end
+    if not run.dundunAlerted then
+        run.dundunAlerted = true
+        Alert("|cffff8000Dundun is near you!|r (" .. why .. ") Walk over him for his Boon.")
+    end
+end
+ns.UnitIsDundun = UnitIsDundun
+
+function ns.ApplyPendingDundun()
+    local p = pendingDundun
+    pendingDundun = nil
+    if p and GetTime() - p.at < 120 then DundunAnnounced(p.event .. " (while zoning in)", p.text) end
 end
 
 ---------------------------------------------------------------------------
@@ -945,6 +997,7 @@ local function Enter(fresh)
     ns.Log("CURIO", "entered delve %s (type %s, difficulty %s), group: %s%s", tostring(name), tostring(instType),
         tostring(diff), IsInGroup() and (Channel() or "?") or "solo", fresh and "" or " (after /reload - keeping the list)")
     StartRunIfNeeded(fresh)
+    ns.ApplyPendingDundun()
     if not frame:IsShown() then frame:Show() end
     Broadcast("H|" .. ns.VERSION)
     ns.RefreshCurios()
@@ -1011,7 +1064,9 @@ function ns.InitCurios()
     ev:RegisterEvent("CHAT_MSG_LOOT")
     ev:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
     for _, e in ipairs({ "CHAT_MSG_RAID_BOSS_EMOTE", "CHAT_MSG_RAID_BOSS_WHISPER", "CHAT_MSG_MONSTER_SAY",
-        "CHAT_MSG_MONSTER_YELL", "CHAT_MSG_MONSTER_WHISPER", "CHAT_MSG_MONSTER_EMOTE" }) do ev:RegisterEvent(e) end
+        "CHAT_MSG_MONSTER_YELL", "CHAT_MSG_MONSTER_WHISPER", "CHAT_MSG_MONSTER_EMOTE", "CHAT_MSG_SYSTEM",
+        "RAID_BOSS_EMOTE", "RAID_BOSS_WHISPER", "UI_INFO_MESSAGE", "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT",
+        "NAME_PLATE_UNIT_ADDED" }) do ev:RegisterEvent(e) end
     ev:SetScript("OnEvent", function(_, event, ...)
         if event == "PLAYER_ENTERING_WORLD" then
             local _, isReload = ...
@@ -1039,9 +1094,19 @@ function ns.InitCurios()
                     run.gameCount, Readable(quantity) and tostring(quantity) or "?")
                 ns.RefreshCurios()
             end
-        elseif event:find("^CHAT_MSG_") and inDelve and run then
+        elseif event == "PLAYER_TARGET_CHANGED" then
+            ns.Guard("dundun unit", UnitIsDundun, "target", "your target")
+        elseif event == "UPDATE_MOUSEOVER_UNIT" then
+            ns.Guard("dundun unit", UnitIsDundun, "mouseover", "mouseover")
+        elseif event == "NAME_PLATE_UNIT_ADDED" then
+            local unit = ...
+            ns.Guard("dundun unit", UnitIsDundun, unit, "nameplate")
+        elseif event == "UI_INFO_MESSAGE" then
+            local _, text = ...
+            ns.Guard("dundun message", DundunAnnounced, event, text)
+        elseif event:find("^CHAT_MSG_") or event:find("^RAID_BOSS_") then
             local text, sender = ...
-            ns.Guard("dundun chat", DundunAnnounced, text, sender)
+            ns.Guard("dundun message", DundunAnnounced, event, text, sender)
         end
     end)
     if WorldMapFrame then
