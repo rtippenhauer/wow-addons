@@ -120,7 +120,12 @@ if (-not (Test-Path $addonsDir)) {
 # ---------------------------------------------------------------- git pull
 if ($doPull) {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        Fail "git is not installed (https://git-scm.com/download/win), or run with -NoPull."
+        # Installed but not on this shell's PATH (e.g. installed after the shell started):
+        # try Git for Windows' usual folders.
+        $gitDir = @("$env:ProgramFiles\Git\cmd", "${env:ProgramFiles(x86)}\Git\cmd", "$env:LOCALAPPDATA\Programs\Git\cmd") |
+            Where-Object { $_ -and (Test-Path (Join-Path $_ 'git.exe')) } | Select-Object -First 1
+        if (-not $gitDir) { Fail "git is not installed (https://git-scm.com/download/win), or run with -NoPull." }
+        $env:PATH = "$gitDir;$env:PATH" # this run only
     }
     $dirty = git -C $RepoRoot status --porcelain -- addons tools
     if ($dirty) {
