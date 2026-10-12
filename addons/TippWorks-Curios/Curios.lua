@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.0"
+ns.VERSION = "1.0.1"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -38,12 +38,35 @@ local answered
 
 local Safe, IsDelve = TW.Safe, TW.IsDelve
 
+local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
+
+-- Curiosities by object id, for when the game hides the marker's name.
+local CURIO_OBJECT_IDS = { [455914] = { "Curiosity", "Mislaid Curiosity" } }
+
+-- Markers WoW reports with a position but no info at all ("unnamed objects").
+-- Could be a curiosity or another interactable; listed as UNKNOWN until the
+-- name becomes readable (usually when you get closer), never synced.
+local UNKNOWN, UNKNOWN_NAME = "Unknown", "Unnamed object (?)"
+local IGNORED_VIGNETTES = { [6116] = true } -- Delver's Supplies
+
+local function VignetteID(guid)
+    return Readable(guid) and type(guid) == "string"
+        and tonumber(guid:match("^Vignette%-%d+%-%d+%-%d+%-%d+%-(%d+)%-%x+$")) or nil
+end
+
+-- Returns kind, display name for a tracked marker (nil if not tracked).
 local function Kind(info)
-    local name = info.name and info.name:lower()
-    if not name then return end
-    for _, p in ipairs(ns.CURIO_PATTERNS) do
-        if name:find(p[1], 1, true) then return p[2] end
+    local name = Readable(info.name) and type(info.name) == "string" and info.name or nil
+    if name then
+        local lower = name:lower()
+        for _, p in ipairs(ns.CURIO_PATTERNS) do
+            if lower:find(p[1], 1, true) then return p[2], name end
+        end
     end
+    local guid = Safe(function() return info.objectGUID end)
+    local id = type(guid) == "string" and tonumber(guid:match("^GameObject%-%d+%-%d+%-%d+%-%d+%-(%d+)%-"))
+    local known = id and CURIO_OBJECT_IDS[id]
+    if known then return known[1], name or known[2] end
 end
 
 ---------------------------------------------------------------------------
@@ -137,12 +160,13 @@ end
 
 -- The same chest can arrive under two keys: its object GUID vs name+position,
 -- or name+position on two different floor maps of the same delve. Same name
--- at the same spot in the world = the same curiosity.
-local function FindSame(name, map, x, y)
+-- at the same spot in the world = the same curiosity. An unnamed object at
+-- the same spot as a named one is the same thing too.
+local function FindSame(name, map, x, y, kind)
     local wx, wy = World(map, x, y)
     for _, k in ipairs(run.order) do
         local it = run.items[k]
-        if it.name == name then
+        if it.name == name or kind == UNKNOWN or it.kind == UNKNOWN then
             if wx and it.wx then
                 if math.sqrt((wx - it.wx) ^ 2 + (wy - it.wy) ^ 2) <= MERGE_YARDS then return it end
             elseif it.map == map and math.abs(it.x - x) < 0.01 and math.abs(it.y - y) < 0.01 then
@@ -157,8 +181,14 @@ local function AddItem(key, kind, name, map, x, y)
     run.alias = run.alias or {}
     local it = run.items[run.alias[key] or key]
     if it then return it, false end
-    local same = FindSame(name, map, x, y)
-    if same then
+    local same = FindSame(name, map, x, y, kind)
+    if same and same.kind == UNKNOWN and kind ~= UNKNOWN then
+        -- The unnamed object turned out to be this: take the real name.
+        run.alias[key] = same.key
+        ns.Log("CURIO", "unnamed object at %.1f,%.1f is a %s", x * 100, y * 100, name)
+        same.kind, same.name = kind, name
+        return same, true
+    elseif same then
         run.alias[key] = same.key
         if not quietMerge then ns.Log("CURIO", "%s arrived under a second key (%s) - merged with the one already listed",
             name, key:find("@", 1, true) and "name+position" or "object GUID") end
@@ -202,7 +232,7 @@ local function MarkLooted(it, who, fromSync)
     if it.looted[who] then return end
     it.looted[who] = true
     if who == me and ns.CurioArrowLooted then ns.CurioArrowLooted(it) end
-    if who == me and not fromSync then Broadcast(Encode(it, "L")) end
+    if who == me and not fromSync and it.kind ~= UNKNOWN then Broadcast(Encode(it, "L")) end
     ns.RefreshCurios()
 end
 
@@ -244,12 +274,29 @@ end
 -- not, so a pickup the addon misses shows up in /tw log under its real name.
 local function NoteMarker(info, kind, hasPos)
     run.markers = run.markers or {}
-    local name = (issecretvalue and issecretvalue(info.name)) and "<hidden by the game>" or tostring(info.name)
+    local name = not Readable(info.name) and (info.name == nil and "<no name>" or "<hidden by the game>") or tostring(info.name)
     local k = name .. (hasPos and "" or " (no position)")
     if run.markers[k] then return end
     run.markers[k] = true
     ns.Log("MARKER", "%s | atlas %s | %s%s", name, tostring(info.atlasName), kind and ("tracked as " .. kind) or "NOT tracked",
         hasPos and "" or " | game gave no map position")
+end
+
+local function NoteUnnamed(vid, pos)
+    run.markers = run.markers or {}
+    local k = ("unnamed %s@%.2f,%.2f"):format(tostring(vid), pos.x, pos.y)
+    if run.markers[k] then return end
+    run.markers[k] = true
+    ns.Log("MARKER", "<no info from the game> | vignette id %s | %.1f, %.1f | %s", tostring(vid), pos.x * 100, pos.y * 100,
+        IGNORED_VIGNETTES[vid] and "ignored" or ("listed as " .. UNKNOWN_NAME))
+end
+
+local function MarkerPos(guid, map)
+    local ok, pos = pcall(C_VignetteInfo.GetVignettePosition, guid, map)
+    if ok and Readable(pos) and pos then
+        local x, y = pos.x, pos.y
+        if Readable(x) and Readable(y) and type(x) == "number" then return pos end
+    end
 end
 
 -- /tw curios scan: everything the game is showing right now.
@@ -259,12 +306,17 @@ function ns.CurioScanReport()
     ns.Print(("map %s, in delve: %s, markers visible: %d"):format(tostring(map), tostring(inDelve), #list))
     for _, guid in ipairs(list) do
         local info = C_VignetteInfo.GetVignetteInfo(guid)
-        if info then
-            local secret = issecretvalue and issecretvalue(info.name)
-            local pos = map and C_VignetteInfo.GetVignettePosition(guid, map)
+        local pos = map and MarkerPos(guid, map)
+        local where = pos and ("%.1f, %.1f"):format(pos.x * 100, pos.y * 100) or "no position"
+        if Readable(info) and info then
+            local kind = Kind(info)
+            local secret = not Readable(info.name)
             ns.Print(("  %s | atlas %s | %s | %s"):format(secret and "<hidden by the game>" or tostring(info.name),
-                tostring(info.atlasName), (not secret and Kind(info)) and "tracked" or "not tracked",
-                pos and ("%.1f, %.1f"):format(pos.x * 100, pos.y * 100) or "no position"))
+                tostring(info.atlasName), kind and ("tracked as " .. kind) or "not tracked", where))
+        else
+            local vid = VignetteID(guid)
+            ns.Print(("  <no info from the game> | vignette id %s | %s | %s"):format(tostring(vid),
+                IGNORED_VIGNETTES[vid] and "ignored" or "listed as unnamed", where))
         end
     end
 end
@@ -274,9 +326,10 @@ local function Scan()
     if not map or not C_VignetteInfo then return end
     local seen, changed = {}, false
     local copies = {} -- the game spawns one copy of each curiosity per player
-    for _, guid in ipairs(C_VignetteInfo.GetVignettes() or {}) do
+    local vignettes = C_VignetteInfo.GetVignettes() or {}
+    for _, guid in ipairs(vignettes) do
         local info = C_VignetteInfo.GetVignetteInfo(guid)
-        local zone = info and info.name and not (issecretvalue and issecretvalue(info.name)) and Kind(info)
+        local zone = Readable(info) and info and Kind(info)
             and ZoneOf(Safe(function() return info.objectGUID end))
         if zone then
             if run.zone and run.zone ~= zone then
@@ -287,40 +340,51 @@ local function Scan()
             break
         end
     end
-    for _, guid in ipairs(C_VignetteInfo.GetVignettes() or {}) do
-        local info = C_VignetteInfo.GetVignetteInfo(guid)
-        if info and info.name and (issecretvalue and issecretvalue(info.name)) then
-            NoteMarker(info, nil, true)
+    local function Track(key, kind, name, pos)
+        local it, new = AddItem(key, kind, name, map, pos.x, pos.y)
+        if kind == UNKNOWN and it.kind ~= UNKNOWN then
+            -- Unnamed duplicate of a marker we already know by name: don't count it as a copy.
+            seen[it.key] = true
+            return
         end
-        if info and info.name and not (issecretvalue and issecretvalue(info.name)) then
-            local kind = Kind(info)
-            local pos = C_VignetteInfo.GetVignettePosition(guid, map)
+        it.x, it.y, it.map = pos.x, pos.y, map
+        it.wx, it.wy = World(map, pos.x, pos.y)
+        seen[it.key] = true
+        copies[it.key] = (copies[it.key] or 0) + 1
+        if new then
+            changed = true
+            ns.Log("CURIO", "found %s at %.1f,%.1f (key: %s)", it.name, pos.x * 100, pos.y * 100,
+                kind == UNKNOWN and "no info from the game" or key:find("@", 1, true) and "name+position, GUID hidden" or "object GUID")
+            if it.kind ~= UNKNOWN then Broadcast(Encode(it, "F")) end
+        end
+        if it.gone then
+            -- The marker only dropped out of view; it's still there.
+            ns.Log("CURIO", "%s marker is back (was flagged gone)", it.name)
+            it.gone = nil
+            changed = true
+        end
+        if not it.present then it.present = true; changed = true end
+    end
+
+    for _, guid in ipairs(vignettes) do
+        local info = C_VignetteInfo.GetVignetteInfo(guid)
+        local pos = MarkerPos(guid, map)
+        if Readable(info) and info then
+            local kind, name = Kind(info)
             NoteMarker(info, kind, pos ~= nil)
-            if kind then
-                if pos then
-                    -- Object GUID is the same for everyone in the instance; fall
-                    -- back to name + position if it is hidden.
-                    local key = Safe(function() return info.objectGUID end)
-                        or ("%s@%.3f,%.3f"):format(info.name, pos.x, pos.y)
-                    local it, new = AddItem(key, kind, info.name, map, pos.x, pos.y)
-                    it.x, it.y, it.map = pos.x, pos.y, map
-                    it.wx, it.wy = World(map, pos.x, pos.y)
-                    seen[it.key] = true
-                    copies[it.key] = (copies[it.key] or 0) + 1
-                    if new then
-                        changed = true
-                        ns.Log("CURIO", "found %s at %.1f,%.1f (key: %s)", info.name, pos.x * 100, pos.y * 100,
-                            key:find("@", 1, true) and "name+position, GUID hidden" or "object GUID")
-                        Broadcast(Encode(it, "F"))
-                    end
-                    if it.gone then
-                        -- The marker only dropped out of view; it's still there.
-                        ns.Log("CURIO", "%s marker is back (was flagged gone)", it.name)
-                        it.gone = nil
-                        changed = true
-                    end
-                    if not it.present then it.present = true; changed = true end
-                end
+            if kind and pos then
+                -- Object GUID is the same for everyone in the instance; fall
+                -- back to name + position if it is hidden.
+                local key = Safe(function() return info.objectGUID end)
+                    or ("%s@%.3f,%.3f"):format(name, pos.x, pos.y)
+                Track(key, kind, name, pos)
+            end
+        elseif pos then
+            -- WoW reports something here but says nothing about it.
+            local vid = VignetteID(guid)
+            NoteUnnamed(vid, pos)
+            if not IGNORED_VIGNETTES[vid] then
+                Track(("unnamed@%.3f,%.3f"):format(pos.x, pos.y), UNKNOWN, UNKNOWN_NAME, pos)
             end
         end
     end
@@ -583,7 +647,7 @@ function ns.RefreshCurios()
         if it then
             local who = WhoText(it)
             if it.looted[me] then mine = mine + 1 end
-            row.name:SetText(it.name)
+            row.name:SetText(it.kind == UNKNOWN and ("|cffcc8cff" .. it.name .. "|r") or it.name)
             local d = DistTo(it)
             local where = d and ("%d yd"):format(d) or ""
             if who ~= "" then
@@ -687,6 +751,10 @@ local function CreatePanel()
                 it.copies ~= nil and tostring(it.copies) or "?"), 1, 1, 1)
             local who = WhoText(it)
             GameTooltip:AddLine(who ~= "" and ("Picked up by: " .. who) or "Nobody (that we know of) has it yet", 1, 1, 1)
+            if it.kind == UNKNOWN then
+                GameTooltip:AddLine("WoW shows a marker here but won't say what it is. Often a curiosity, but it can be"
+                    .. " another object. It gets its real name once the game reveals it (usually up close).", 0.8, 0.55, 1, true)
+            end
             if it.gone and who == "" then
                 GameTooltip:AddLine("The map marker disappeared: someone without the addon took it, or it's out of view.", 0.8, 0.8, 0.8, true)
             end
@@ -799,7 +867,7 @@ local function OnAddonMessage(prefix, msg, _, sender)
         answered[who] = GetTime()
         for _, k in ipairs(run.order) do
             local it = run.items[k]
-            Broadcast(Encode(it, it.looted[me] and "L" or "F"))
+            if it.kind ~= UNKNOWN then Broadcast(Encode(it, it.looted[me] and "L" or "F")) end
         end
         ns.RefreshCurios()
         return
