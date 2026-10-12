@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.5"
+ns.VERSION = "1.0.6"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -22,7 +22,8 @@ ns.CURIO_PATTERNS = {
 -- Same prefix as the CoiledRareTracker versions, so mixed parties still sync.
 local PREFIX = "CRTCurio"
 local LOOT_RANGE = 15 -- yards: a marker vanishing this close means you took it
-local VIEW_RANGE = 200 -- markers drop out of view around 250 yd; beyond this a vanish means nothing
+local VIEW_RANGE = 40 -- a marker vanishing further away than this just dropped out of view
+-- (no-info 5482 markers flicker in and out at 70-90 yd); only closer means "marker gone"
 local ROW_H, WIDTH, MAX_ROWS = 18, 300, 16
 
 local db, run
@@ -454,7 +455,7 @@ local function Scan()
                     MarkLooted(it, me)
                     changed = true
                 elseif now == 0 and d and d > VIEW_RANGE then
-                    -- Just out of view (~250 yd); not a pickup, not gone.
+                    -- Just out of view; not a pickup, not gone.
                     it.present = false
                 elseif now == 0 then
                     it.present = false
@@ -840,6 +841,8 @@ function ns.RefreshCurios()
         users[#users + 1] = ("%s %s"):format(n, same and ("|cff888888v" .. v .. "|r")
             or ("|cffff5555" .. (v == "?" and "v?" or v == "older" and "old version" or ("v" .. v)) .. "|r"))
     end
+    -- The game's own counter (currency 3253) is exact; use it when it's ahead of ours.
+    if run.gameCount and run.gameCount > mine then mine = run.gameCount end
     frame.footer:SetText(("Found %d  |  you: %d%s%s"):format(total, mine,
         run.gameCount and (" |cff888888(game: %d)|r"):format(run.gameCount) or "",
         #users > 0 and ("  |  synced: " .. table.concat(users, ", ")) or "  |  no party sync"))
@@ -1147,6 +1150,7 @@ local function Summary(tt)
                 if it.looted[me] then mine = mine + 1 end
             end
         end
+        if run.gameCount and run.gameCount > mine then mine = run.gameCount end
         tt:AddLine(("Curiosities: %d found, you have %d"):format(found, mine), 1, 1, 1)
         if run.dundunAlerted then tt:AddLine("Dundun spotted this run", 1, 0.5, 0) end
     else
