@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.1"
+ns.VERSION = "1.0.2"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -48,6 +48,12 @@ local CURIO_OBJECT_IDS = { [455914] = { "Curiosity", "Mislaid Curiosity" } }
 -- name becomes readable (usually when you get closer), never synced.
 local UNKNOWN, UNKNOWN_NAME = "Unknown", "Unnamed object (?)"
 local IGNORED_VIGNETTES = { [6116] = true } -- Delver's Supplies
+
+-- A Boon with no known curiosity nearby: the game never showed this one, so
+-- it's added where you stood, already picked up. Local only, never synced.
+local PICKUP, PICKUP_NAME = "Pickup", "Curiosity (picked up)"
+
+local function Syncable(it) return it.kind ~= UNKNOWN and it.kind ~= PICKUP end
 
 local function VignetteID(guid)
     return Readable(guid) and type(guid) == "string"
@@ -228,11 +234,13 @@ function ns.ResetCurioRun()
     if ns.RefreshCurios then ns.RefreshCurios() end
 end
 
+local lastMine -- GetTime() of your last credited pickup
 local function MarkLooted(it, who, fromSync)
     if it.looted[who] then return end
     it.looted[who] = true
     if who == me and ns.CurioArrowLooted then ns.CurioArrowLooted(it) end
-    if who == me and not fromSync and it.kind ~= UNKNOWN then Broadcast(Encode(it, "L")) end
+    if who == me then lastMine = GetTime() end
+    if who == me and not fromSync and Syncable(it) then Broadcast(Encode(it, "L")) end
     ns.RefreshCurios()
 end
 
@@ -355,7 +363,7 @@ local function Scan()
             changed = true
             ns.Log("CURIO", "found %s at %.1f,%.1f (key: %s)", it.name, pos.x * 100, pos.y * 100,
                 kind == UNKNOWN and "no info from the game" or key:find("@", 1, true) and "name+position, GUID hidden" or "object GUID")
-            if it.kind ~= UNKNOWN then Broadcast(Encode(it, "F")) end
+            if Syncable(it) then Broadcast(Encode(it, "F")) end
         end
         if it.gone then
             -- The marker only dropped out of view; it's still there.
@@ -623,9 +631,32 @@ local function OnLootMessage(msg)
     if best then
         ns.Log("CURIO", "%s at %.1f,%.1f: got a Boon %d yd from it -> YOUR pickup", best.name, best.x * 100, best.y * 100, bestD)
         MarkLooted(best, me)
-    else
-        ns.Log("CURIO", "got a Boon but no unclaimed curiosity within %d yd - right-click the row to mark it", CLAIM_YARDS)
+        return
     end
+    -- One pickup can send two Boon lines, sometimes after the pickup was already
+    -- counted (marker vanished next to you): those aren't new curiosities.
+    if lastMine and GetTime() - lastMine < 10 then
+        ns.Log("CURIO", "got a Boon - already counted (pickup %.1fs ago)", GetTime() - lastMine)
+        return
+    end
+    for _, k in ipairs(run.order) do
+        local it = run.items[k]
+        local d = it.looted[me] and DistTo(it)
+        if d and d <= CLAIM_YARDS then
+            ns.Log("CURIO", "got a Boon %d yd from %s you already have - already counted", d, it.name)
+            return
+        end
+    end
+    local map = C_Map.GetBestMapForUnit("player")
+    local p = map and C_Map.GetPlayerMapPosition(map, "player")
+    if not p then
+        ns.Log("CURIO", "got a Boon, no curiosity known nearby and no position to record it")
+        return
+    end
+    local it = AddItem(("pickup@%d"):format(time()), PICKUP, PICKUP_NAME, map, p.x, p.y)
+    it.present = false
+    ns.Log("CURIO", "got a Boon with no curiosity known nearby -> added '%s' at %.1f,%.1f", PICKUP_NAME, p.x * 100, p.y * 100)
+    MarkLooted(it, me)
 end
 
 ---------------------------------------------------------------------------
@@ -751,6 +782,9 @@ local function CreatePanel()
                 it.copies ~= nil and tostring(it.copies) or "?"), 1, 1, 1)
             local who = WhoText(it)
             GameTooltip:AddLine(who ~= "" and ("Picked up by: " .. who) or "Nobody (that we know of) has it yet", 1, 1, 1)
+            if it.kind == PICKUP then
+                GameTooltip:AddLine("Counted from the Boon you received - the game never showed a marker for it.", 0.8, 0.8, 0.8, true)
+            end
             if it.kind == UNKNOWN then
                 GameTooltip:AddLine("WoW shows a marker here but won't say what it is. Often a curiosity, but it can be"
                     .. " another object. It gets its real name once the game reveals it (usually up close).", 0.8, 0.55, 1, true)
@@ -867,7 +901,7 @@ local function OnAddonMessage(prefix, msg, _, sender)
         answered[who] = GetTime()
         for _, k in ipairs(run.order) do
             local it = run.items[k]
-            if it.kind ~= UNKNOWN then Broadcast(Encode(it, it.looted[me] and "L" or "F")) end
+            if Syncable(it) then Broadcast(Encode(it, it.looted[me] and "L" or "F")) end
         end
         ns.RefreshCurios()
         return

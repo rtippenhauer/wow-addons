@@ -4,6 +4,11 @@ Inside a delve, a panel lists every **Mislaid Curiosity, Sturdy Chest, Heavy Tru
 as the game shows it on the map. Use a reveal buff and you get them all at once. The panel
 also tracks who has picked up which one.
 
+- **Unnamed objects:** sometimes the game shows a marker but won't say what it is (Deep Delve's
+  purple "?"). These are listed in purple as **Unnamed object (?)**. When the game reveals the
+  name, usually up close, the row takes it.
+- **Pickups the game never showed:** if you get a Boon with no known curiosity nearby, the addon
+  adds a **Curiosity (picked up)** row where you stood, so your count stays right.
 - **Party sync:** party members running this addon share finds and pickups automatically.
   The footer shows who is synced and their version. A version in red means it doesn't match yours.
 - **Map pins:** the world map shows a green tick for picked up, gold for still there, grey for gone.
