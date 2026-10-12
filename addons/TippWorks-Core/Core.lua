@@ -10,7 +10,7 @@ ns.TW = TW
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-TW.VERSION = "1.0.0"
+TW.VERSION = "1.1.0"
 TW.COLOR = "e6a23c"
 TW.WEBSITE = "https://github.com/rtippenhauer/wow-addons"
 
@@ -77,7 +77,8 @@ function TW.Help()
     for _, m in ipairs(TW.order) do
         Print(("  |cffffd100/tw %s|r - %s  |cff888888(/tw %s help)|r"):format(m.key, m.name, m.key))
     end
-    Print("  /tw log - activity log (/tw log clear)  |  /tw minimap - show/hide the minimap button")
+    Print("  /tw share group|say|guild|self - where delve clicks are shared  |  /tw portal <zone> - save a Silvermoon portal spot")
+    Print("  /tw map - re-find the delve zone maps  |  /tw log - activity log (/tw log clear)  |  /tw minimap - show/hide the minimap button")
     Print("  /tw version - installed TippWorks addons  |  /tw help - this list")
 end
 
@@ -95,6 +96,12 @@ function TW.Command(msg)
         TW.LogCommand(rest:lower())
     elseif cmd == "minimap" then
         TW.ToggleMinimapButton()
+    elseif cmd == "share" then
+        TW.ShareCommand(rest)
+    elseif cmd == "portal" then
+        TW.SavePortal(rest)
+    elseif cmd == "map" then
+        TW.MapCommand()
     elseif cmd == "version" or cmd == "versions" then
         Versions()
     elseif TW.modules[cmd] then

@@ -1,3 +1,5 @@
 {
-    "renames": []
+    "renames": [
+        { "from": "CoiledRareTracker", "to": "TippWorks-Rares" }
+    ]
 }

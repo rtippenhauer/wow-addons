@@ -194,9 +194,24 @@ $wowRunning = Test-WowRunning
 $needRestart = $false
 $results = @()
 
+# One-time renames (tools\migrations.json). While WoW is running the new addon is
+# NOT installed next to the old one: both would load and fight over the same saved data.
+$renames = @()
+if (Test-Path $MigrationsPath) { $renames = @((Read-Json $MigrationsPath).renames | Where-Object { $_ }) }
+$blocked = @{}
+foreach ($r in $renames) {
+    if ($wowRunning -and (Test-Path (Join-Path $addonsDir $r.from)) -and -not (Test-Path (Join-Path $addonsDir $r.to))) {
+        $blocked[$r.to] = $r.from
+    }
+}
+
 foreach ($src in $sources) {
     $name   = $src.Name
     $dest   = Join-Path $addonsDir $name
+    if ($blocked.ContainsKey($name)) {
+        $results += [pscustomobject]@{ Addon = $name; Installed = "replaces $($blocked[$name])"; Result = 'WAITING - close WoW' }
+        continue
+    }
     $newVer = Get-TocVersion $src.FullName
     $oldVer = Get-TocVersion $dest
     $newMan = Get-Manifest $src.FullName
@@ -242,10 +257,9 @@ foreach ($src in $sources) {
 # migrations.json: { "renames": [ { "from": "OldFolder", "to": "NewFolder" } ] }
 # When the new addon is installed: copy saved data OldFolder.lua -> NewFolder.lua (only if the
 # new file doesn't exist yet, only while WoW is closed), then back up + remove the old addon folder.
-if (Test-Path $MigrationsPath) {
-    $mig = Read-Json $MigrationsPath
-    foreach ($r in @($mig.renames)) {
-        if (-not $r -or -not (Test-Path (Join-Path $addonsDir $r.to))) { continue }
+if ($renames.Count -gt 0) {
+    foreach ($r in $renames) {
+        if (-not (Test-Path (Join-Path $addonsDir $r.to))) { continue }
         $oldDir = Join-Path $addonsDir $r.from
         if ($wowRunning) {
             if (Test-Path $oldDir) { Say "Rename $($r.from) -> $($r.to) waits until WoW is closed. Close WoW and run the updater again." 'Yellow' }
@@ -278,7 +292,10 @@ Say ""
 $results | Format-Table -AutoSize | Out-String | ForEach-Object { Write-Host $_.TrimEnd() }
 Say ""
 $changed = $results | Where-Object { $_.Result -notlike 'up to date' }
-if (-not $changed) {
+if ($blocked.Count -gt 0) {
+    Say ("Not finished: {0} replaces {1}. Exit WoW completely, run the updater again, then start WoW." -f
+        (($blocked.Keys) -join ', '), (($blocked.Values) -join ', ')) 'Yellow'
+} elseif (-not $changed) {
     Say "Everything is already up to date." 'Green'
 } elseif ($needRestart) {
     Say "Exit WoW completely and start it again (new/removed files or .toc changes - /reload is NOT enough)." 'Yellow'

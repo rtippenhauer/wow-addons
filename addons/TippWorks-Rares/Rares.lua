@@ -1,5 +1,12 @@
 local ADDON, ns = ...
+local TW = TippWorks
+
+-- Coiled Isle daily rares: kill tracking, distances, waypoint + target +
+-- skull on click, a saved route on the world map (Route.lua) and a target
+-- popup (Target.lua). Saved data keeps CoiledRareTracker's names
+-- (CoiledRareTrackerDB) so kills, routes and settings carry over.
 ns.VERSION = ns.VERSION or C_AddOns.GetAddOnMetadata(ADDON, "Version") or "?" -- set in Data.lua
+ns.Log, ns.Guard = TW.Log, TW.Guard
 local db
 local zoneMapID
 local byName = {}
@@ -10,19 +17,12 @@ local wasInZone
 local SKULL = 8
 
 local ROW_H, WIDTH = 18, 350
-local TOP = 54 -- title + tab buttons
+local TOP = 36 -- title
 ns.WIDTH = WIDTH
-local PREFIX = "|cff33ff99Coiled Rares:|r "
 
-local function Print(msg) print(PREFIX .. msg) end
-
+local Print = TW.Printer("Rares")
 -- Guard against Midnight "secret values": anything restricted in combat is skipped.
-local function Safe(fn, ...)
-    local ok, a = pcall(fn, ...)
-    if not ok then return nil end
-    if issecretvalue and issecretvalue(a) then return nil end
-    return a
-end
+local Safe = TW.Safe
 
 ---------------------------------------------------------------------------
 -- Daily reset
@@ -332,7 +332,7 @@ end
 function SetWaypoint(r, isAuto)
     local map, x, y = ZoneMap(), Coords(r)
     if not x then
-        if not isAuto then Print(r.name .. " has no location yet. Stand at it and type /crt set " .. r.name) end
+        if not isAuto then Print(r.name .. " has no location yet. Stand at it and type /tw rares set " .. r.name) end
         return
     end
     if not map then
@@ -490,37 +490,10 @@ end
 
 ns.Toggle = function(show) Toggle(show) end
 
-local tabs = {}
-local function SelectTab(name)
-    if not frame then return end
-    -- Swapping pages hides/shows the secure rare rows: not allowed in combat.
-    if InCombatLockdown() then Print("can't switch tabs in combat.") return end
-    db.tab = name
-    frame.rares:SetShown(name == "rares")
-    frame.delves:SetShown(name == "delves")
-    frame.weekly:SetShown(name == "weekly")
-    frame.bountiful:SetShown(name == "bountiful")
-    local titles = { rares = "Coiled Isle Rares", delves = "Delver's Call Quests",
-        weekly = "Weekly Checklist (90)", bountiful = "Bountiful Delves Today" }
-    frame.title:SetText(titles[name])
-    local heights = {
-        rares = TOP + #ns.RARES * ROW_H + 54, -- room for a 2-line footer
-        delves = frame.delves.contentHeight + 40,
-        weekly = frame.weekly.contentHeight + 40,
-        bountiful = frame.bountiful.contentHeight,
-    }
-    frame:SetHeight(heights[name])
-    for key, t in pairs(tabs) do
-        if key == name then t:LockHighlight() else t:UnlockHighlight() end
-        t:SetEnabled(key ~= name)
-    end
-    ns.Refresh()
-end
-ns.SelectTab = SelectTab
 
 local function CreateMainFrame()
-    frame = CreateFrame("Frame", "CoiledRareTrackerFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(WIDTH, 40 + #ns.RARES * ROW_H + 40)
+    frame = CreateFrame("Frame", "TippWorksRaresFrame", UIParent, "BackdropTemplate")
+    frame:SetSize(WIDTH, TOP + #ns.RARES * ROW_H + 54) -- room for a 2-line footer
     frame:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -554,19 +527,6 @@ local function CreateMainFrame()
 
     frame.rares = CreateFrame("Frame", nil, frame)
     frame.rares:SetAllPoints()
-    frame.delves = ns.CreateDelvesPage(frame, -TOP)
-    frame.weekly = ns.CreateWeeklyPage(frame, -TOP)
-    frame.bountiful = ns.CreateBountifulPage(frame, -TOP)
-
-    local TAB_TEXT = { rares = "Rares", delves = "Delves", weekly = "Weekly", bountiful = "Bountiful" }
-    for i, key in ipairs({ "rares", "delves", "weekly", "bountiful" }) do
-        local t = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-        t:SetSize(78, 20)
-        t:SetPoint("TOPLEFT", 10 + (i - 1) * 82, -30)
-        t:SetText(TAB_TEXT[key])
-        t:SetScript("OnClick", function() SelectTab(key) end)
-        tabs[key] = t
-    end
 
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", 2, 2)
@@ -589,8 +549,6 @@ local function CreateMainFrame()
     frame.footer:SetPoint("BOTTOMLEFT", 12, 34) -- above the buttons
 
     for i = 1, #ns.RARES do rows[i] = CreateRow(i) end
-    local valid = { rares = true, delves = true, weekly = true, bountiful = true }
-    SelectTab(valid[db.tab] and db.tab or "rares")
     frame:Hide()
 end
 
@@ -630,9 +588,6 @@ end
 function ns.Refresh()
     if not frame then return end
     CheckReset()
-    ns.RefreshDelves()
-    ns.RefreshWeekly()
-    ns.RefreshBountiful()
 
     local orderOf = {}
     if db.route then
@@ -674,7 +629,7 @@ function ns.Refresh()
     local reset = db.resetAt and (db.resetAt - time()) or 0
     frame.footer:SetText(("%d/%d killed  |  reset in %dh %dm%s"):format(
         done, #ns.RARES, math.floor(reset / 3600), math.floor(reset % 3600 / 60),
-        ns.ShardsCapped() and "\n|cff888888Shards capped (600) this week - rares are optional.|r" or ""))
+        (TW.ShardsCapped and TW.ShardsCapped()) and "\n|cff888888Shards capped (600) this week - rares are optional.|r" or ""))
 end
 
 ---------------------------------------------------------------------------
@@ -687,24 +642,21 @@ local function FindRare(query)
     end
 end
 
-SLASH_COILEDRARETRACKER1 = "/crt"
-SLASH_COILEDRARETRACKER2 = "/coiled"
-SlashCmdList.COILEDRARETRACKER = function(msg)
+-- Commands that moved to other TippWorks addons: /crt <old> -> /tw <new>.
+local MOVED = {
+    curios = "curios", curiosities = "curios", arrow = "curios arrow",
+    calls = "calls list", delves = "calls", weekly = "weekly", bountiful = "bountiful", stash = "vault stash",
+    share = "share", portal = "portal", log = "log", minimap = "minimap",
+}
+
+local module
+local function Command(msg)
     local cmd, rest = msg:match("^(%S*)%s*(.-)$")
     cmd = (cmd or ""):lower()
-    if cmd == "" or cmd == "show" or cmd == "toggle" then
+    if cmd == "" or cmd == "show" or cmd == "toggle" or cmd == "rares" then
         Toggle(cmd == "show" or nil)
-    elseif cmd == "curios" or cmd == "curiosities" or cmd == "arrow" then
-        -- The curiosities panel moved to the TippWorks-Curios addon (/tw curios).
-        local twCmd = (cmd == "arrow" and "curios arrow " or "curios ") .. rest
-        if TippWorks and TippWorks.modules.curios then
-            TippWorks.Command(twCmd)
-        else
-            Print("delve curiosities moved to the TippWorks-Curios addon (needs TippWorks-Core) - then use /tw " .. twCmd)
-        end
-    elseif cmd == "delves" or cmd == "rares" or cmd == "weekly" or cmd == "bountiful" then
-        Toggle(true)
-        SelectTab(cmd)
+    elseif MOVED[cmd] then
+        TW.Command(MOVED[cmd] .. (rest ~= "" and (" " .. rest) or ""))
     elseif cmd == "reset" then
         wipe(db.killed); wipe(db.absent); Changed(); Print("all rares cleared.")
     elseif cmd == "set" or cmd == "clear" then
@@ -732,34 +684,6 @@ SlashCmdList.COILEDRARETRACKER = function(msg)
         db.mapBarPos = nil
         if ns.PlaceMapButtons then ns.PlaceMapButtons() end
         Print("map buttons moved back to the bottom-left of the map.")
-    elseif cmd == "calls" then
-        ns.PrintCalls()
-    elseif cmd == "log" then
-        ns.LogCommand(rest:lower())
-    elseif cmd == "minimap" then
-        ns.ToggleMinimapButton()
-    elseif cmd == "stash" then
-        -- Shows where (if anywhere) the game exposes the Gilded Stash count.
-        local id = db.currencyIDs and db.currencyIDs.stash
-        local cur = id and C_CurrencyInfo.GetCurrencyInfo(id)
-        if cur then
-            Print(("currency '%s' (id %d): have %d, max %d, this week %d/%d"):format(cur.name, id, cur.quantity,
-                cur.maxQuantity or 0, cur.quantityEarnedThisWeek or 0, cur.maxWeeklyQuantity or 0))
-        else
-            Print("no 'Gilded Stash' currency found.")
-        end
-        local t = ns.DelveTooltipCount("gilded stash")
-        Print(t and ("delve map tooltip: \"" .. t[3] .. "\"") or "no Gilded Stash count on any delve map tooltip right now.")
-    elseif cmd == "portal" then
-        ns.SavePortal(rest)
-    elseif cmd == "share" then
-        local mode = rest:lower()
-        if mode == "group" or mode == "say" or mode == "guild" or mode == "self" then
-            db.shareMode = mode
-            Print("delve shares now go to: " .. mode .. (mode == "group" and " (party/raid when grouped, otherwise only you)" or "") .. ".")
-        else
-            Print("delve shares go to: " .. (db.shareMode or "group") .. ". Options: /crt share group | say | guild | self")
-        end
     elseif cmd == "unlock" then
         ns.ToggleTargetButtonLock()
     elseif cmd == "unseen" then
@@ -776,13 +700,64 @@ SlashCmdList.COILEDRARETRACKER = function(msg)
         Print("auto-show in the Coiled Isle " .. (db.autoShow and "ON" or "OFF") .. ".")
     elseif cmd == "map" then
         zoneMapID = nil; db.mapID = nil
-        ns.ResetMapCache()
         Print("zone map id: " .. tostring(ZoneMap()))
-        for _, z in ipairs(ns.DELVE_ZONES) do Print("  " .. z .. ": " .. tostring(ns.FindMapByName(z))) end
+        TW.MapCommand()
     else
-        Print("/crt - toggle | /crt calls - Delver's Call status | /crt log - activity log (/crt log clear) | /crt minimap - show/hide minimap button | /crt delves | /crt rares | /crt weekly | /crt bountiful | curiosities: /tw curios (TippWorks-Curios) | /crt share group|say|guild|self | /crt portal <zone> - save a portal spot | /crt new - new route from here | /crt clearroute | /crt next | /crt route - show/hide map route | /crt unseen | /crt unlock - move the target popup | /crt mapbuttons - reset map button position | /crt autonext | /crt reset | /crt set <name> | /crt clear <name> | /crt auto | /crt map")
+        TW.ModuleHelp(module)
     end
 end
+
+-- The old command still works: /crt and /coiled = /tw rares.
+SLASH_COILEDRARETRACKER1 = "/crt"
+SLASH_COILEDRARETRACKER2 = "/coiled"
+SlashCmdList.COILEDRARETRACKER = function(msg) TW.Guard("/crt " .. (msg or ""), Command, msg or "") end
+
+---------------------------------------------------------------------------
+-- TippWorks registration
+---------------------------------------------------------------------------
+local function Progress()
+    local n = 0
+    for _ in pairs(db.killed) do n = n + 1 end
+    return n, #ns.RARES
+end
+
+local function Summary(tt)
+    local killed, total = Progress()
+    local capped = TW.ShardsCapped and TW.ShardsCapped()
+    tt:AddLine(("Coiled rares today: %d/%d%s"):format(killed, total, capped and " |cff888888(shards capped)|r" or ""), 1, 1, 1)
+end
+
+module = TW.Register({
+    key = "rares", aliases = { "rare", "crt" },
+    name = "Coiled Isle Rares", addon = ADDON, version = ns.VERSION,
+    command = Command, toggle = function(show) Toggle(show) end, summary = Summary, progress = Progress,
+    help = {
+        { "", "show/hide the rares window (/crt works too)" },
+        { "new", "build a new route from where you are" },
+        { "next", "waypoint to the next rare on the route" },
+        { "clearroute", "remove the route from the map" },
+        { "route", "show/hide the route on the map" },
+        { "autonext", "auto-waypoint to the next rare after a kill (on/off)" },
+        { "auto", "open the window by itself in the Coiled Isle (on/off)" },
+        { "reset", "clear today's kills" },
+        { "unseen", "clear the 'not up' marks" },
+        { "set <rare>", "save the rare's location where you stand" },
+        { "clear <rare>", "restore the rare's default location" },
+        { "unlock", "move the Target popup (again to lock)" },
+        { "mapbuttons", "move the map buttons back to the bottom-left" },
+        { "map", "re-find the Coiled Isle map" },
+    },
+})
+
+function TippWorksRares_OnAddonCompartmentClick() Toggle() end
+function TippWorksRares_OnAddonCompartmentEnter(_, menuButton)
+    GameTooltip:SetOwner(menuButton, "ANCHOR_LEFT")
+    GameTooltip:AddLine("|cff" .. TW.COLOR .. "Tippenhauer Works|r - Coiled Rares")
+    Summary(GameTooltip)
+    GameTooltip:AddLine("Click: show/hide  |  /tw rares help", 0.6, 0.6, 0.6)
+    GameTooltip:Show()
+end
+function TippWorksRares_OnAddonCompartmentLeave() GameTooltip:Hide() end
 
 ---------------------------------------------------------------------------
 -- Events
@@ -794,9 +769,8 @@ ev:SetScript("OnEvent", function(self, event, arg1)
         if arg1 ~= ADDON then return end
         CoiledRareTrackerDB = CoiledRareTrackerDB or {}
         CoiledRareTrackerAccountDB = CoiledRareTrackerAccountDB or {}
-        ns.db = CoiledRareTrackerDB
-        ns.InitLog()
-        -- Portal spots used to be saved per character; move them warband-wide.
+        -- Portal spots used to be saved per character; move them warband-wide
+        -- (TippWorks-Calls then copies them into TippWorks-Core's settings).
         if CoiledRareTrackerDB.portals then
             CoiledRareTrackerAccountDB.portals = CoiledRareTrackerAccountDB.portals or {}
             for z, p in pairs(CoiledRareTrackerDB.portals) do
@@ -817,21 +791,18 @@ ev:SetScript("OnEvent", function(self, event, arg1)
         if db.autoNext == nil then db.autoNext = true end
         for _, r in ipairs(ns.RARES) do byName[r.name] = r end
         CheckReset()
+        db.log = nil -- the activity log lives in TippWorks-Core now (/tw log)
+        TW.Log("INFO", "TippWorks-Rares v%s loaded", ns.VERSION)
         CreateMainFrame()
         ns.InitRoute()
         ns.InitTargetButton()
-        ns.InitMinimap()
 
         self:RegisterEvent("PLAYER_ENTERING_WORLD")
         self:RegisterEvent("ZONE_CHANGED_NEW_AREA")
         self:RegisterEvent("ZONE_CHANGED")
         self:RegisterEvent("ZONE_CHANGED_INDOORS")
-        self:RegisterEvent("QUEST_LOG_UPDATE")
-        self:RegisterEvent("QUEST_TURNED_IN")
-        self:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
-        self:RegisterEvent("WEEKLY_REWARDS_UPDATE")
-        self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
         self:RegisterEvent("PLAYER_TARGET_CHANGED")
+        self:RegisterEvent("RAID_TARGET_UPDATE")
         self:RegisterEvent("PLAYER_REGEN_ENABLED")
         self:RegisterEvent("LOOT_OPENED")
 
@@ -860,7 +831,6 @@ ev:SetScript("OnEvent", function(self, event, arg1)
             wasInZone = inZone
             if inZone and db.autoShow then
                 Toggle(true)
-                if db.tab ~= "rares" and not InCombatLockdown() then SelectTab("rares") end
             elseif not inZone then
                 Toggle(false)
             end
@@ -868,10 +838,16 @@ ev:SetScript("OnEvent", function(self, event, arg1)
         elseif IsInInstance() and frame:IsShown() then
             Toggle(false) -- opened by hand elsewhere, then walked into a delve
         end
-    elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_TURNED_IN" then
-        ns.RefreshDelves()
-    elseif event == "CURRENCY_DISPLAY_UPDATE" or event == "WEEKLY_REWARDS_UPDATE" or event == "PLAYER_EQUIPMENT_CHANGED" then
-        ns.RefreshWeekly() -- also tracks shard gains/charge use while the tab is closed
+    elseif event == "RAID_TARGET_UPDATE" then
+        -- Any raid-mark change on your target, whoever made it - shows whether a
+        -- skull you placed actually stuck.
+        local ok, name = pcall(UnitName, "target")
+        if ok and name and not (issecretvalue and issecretvalue(name)) and byName[name] then
+            local ok2, icon = pcall(GetRaidTargetIndex, "target")
+            ns.Log("MARK", "target %s now has mark %s%s", name, ok2 and tostring(icon) or "?",
+                (IsInGroup() and not UnitIsGroupLeader("player") and not UnitIsGroupAssistant("player")) and
+                " (you're not leader/assist)" or "")
+        end
     elseif event == "PLAYER_REGEN_ENABLED" then
         if pendingToggle ~= nil then Toggle(pendingToggle); pendingToggle = nil end
         CheckUnit("target")

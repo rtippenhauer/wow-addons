@@ -7,7 +7,7 @@
 ## Category: Tippenhauer Works
 ## Group: TippWorks-Core
 ## Dependencies: TippWorks-Core
-## OptionalDeps: CoiledRareTracker, TomTom
+## OptionalDeps: TippWorks-Rares, CoiledRareTracker, TomTom
 ## SavedVariablesPerCharacter: TippWorksCuriosDB
 ## IconTexture: Interface\Icons\INV_Box_01
 ## AddonCompartmentFunc: TippWorksCurios_OnAddonCompartmentClick

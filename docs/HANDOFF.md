@@ -3,9 +3,11 @@
 World of Warcraft **Midnight (12.1, Season 2)** retail addon, built iteratively with Rob
 (Nectras on Zuluhed) and played with Terry (Ngoth). Current version: **1.10.0**.
 
-> **Being split into the TippWorks family** (see the repo README / CLAUDE.md). As of 1.10.0 the
-> delve curiosities panel lives in `addons/TippWorks-Curios` (needs `addons/TippWorks-Core`);
-> `/crt curios` and `/crt arrow` forward to `/tw curios`. The curiosity notes below still apply there.
+> **Split into the TippWorks family (Oct 2026).** CoiledRareTracker no longer exists as an addon:
+> Rares/Route/Target -> `addons/TippWorks-Rares`, Delves -> `TippWorks-Calls`, Weekly + Bountiful ->
+> `TippWorks-Vault`, Curios -> `TippWorks-Curios`, Log/Minimap + shared delve travel (map lookup,
+> flight points, portals, ActivateDelve) -> `TippWorks-Core`. The notes below are still accurate
+> for the code; file names and `/crt` commands map as above (`/tw <addon> help`).
 Nothing here could ever be run in game by Claude — every change was syntax-checked only,
 then verified by Rob in game via screenshots, `/crt log`, and the SavedVariables file.
 

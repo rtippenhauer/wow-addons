@@ -1,6 +1,7 @@
 local _, ns = ...
+local TW = TippWorks
 
--- "Weekly" tab: the level-90 Season 2 weekly gearing checklist (from the
+-- Weekly tab: the level-90 Season 2 weekly gearing checklist (from the
 -- Weekly Gearing Guide PDF, verified Oct 9 2026). Reads the game where it can
 -- (currencies, Great Vault, equipped tier); the rest are click-to-check.
 local ROW_H = 20
@@ -195,7 +196,7 @@ local function OpenVault()
 end
 
 local function OrinWaypoint()
-    local map = ns.FindMapByName(ORIN.zone)
+    local map = TW.FindMapByName(ORIN.zone)
     if map and C_Map.CanSetUserWaypointOnMap(map) then
         C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(map, ORIN.x / 100, ORIN.y / 100))
         C_SuperTrack.SetSuperTrackedUserWaypoint(true)
@@ -217,17 +218,18 @@ local ITEMS = {
               "Journey rank 6 also unlocks 2 weekly vendor keys." } },
     { key = "rares", label = "Coiled Isle rares today", kind = "auto",
       read = function()
-          local n = 0
-          for _ in pairs(ns.db.killed) do n = n + 1 end
+          local rares = TW.modules.rares
+          if not (rares and rares.progress) then return "|cff888888TippWorks-Rares not enabled|r", false end
+          local n, total = rares.progress()
           if ns.ShardsCapped() then
-              return ("|cff888888not needed - shards capped (%d/%d)|r"):format(n, #ns.RARES), true
+              return ("|cff888888not needed - shards capped (%d/%d)|r"):format(n, total), true
           end
-          return ("%d/%d"):format(n, #ns.RARES), n >= #ns.RARES
+          return ("%d/%d"):format(n, total), n >= total
       end,
-      click = function() ns.SelectTab("rares") end,
+      click = function() if TW.modules.rares then TW.modules.rares.toggle(true) end end,
       tip = { "50 shards each, once a day - only worth it until you hit 600 shards for the week.",
               "Once capped this row is ticked off; kill them anyway for rep, mounts or the achievement.",
-              "Click: switch to the Rares tab." } },
+              "Click: open the Coiled Rares window." } },
     { key = "delves", label = "Delves for the Vault (T8+)", kind = "auto", read = DelvesVault,
       fallbackCount = 8,
       tip = { "2 / 4 / 8 delves unlock 1 / 2 / 3 Vault choices for next week.",
@@ -328,7 +330,7 @@ local function OnClick(self, btn)
 end
 
 function ns.CreateWeeklyPage(parent, top)
-    acct = CoiledRareTrackerAccountDB
+    acct = TW.account
     page = CreateFrame("Frame", nil, parent)
     page:SetAllPoints()
     local y = top

@@ -1,0 +1,19 @@
+## Interface: 120100, 120105, 120001, 120000
+## Title: |cffe6a23cTippenhauer Works|r - Weekly Vault (90)
+## Notes: Level 90 weekly gearing checklist (Great Vault, coffer key shards, Voidcore, catalyst) and today's Bountiful Delves.
+## Author: rtippenhauer (Tippenhauer Works)
+## Version: 1.0.0
+## X-Website: https://github.com/rtippenhauer/wow-addons
+## Category: Tippenhauer Works
+## Group: TippWorks-Core
+## Dependencies: TippWorks-Core
+## OptionalDeps: TippWorks-Rares, CoiledRareTracker
+## SavedVariablesPerCharacter: TippWorksVaultDB
+## IconTexture: Interface\Icons\INV_Misc_Coin_02
+## AddonCompartmentFunc: TippWorksVault_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: TippWorksVault_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: TippWorksVault_OnAddonCompartmentLeave
+
+Vault.lua
+Weekly.lua
+Bountiful.lua

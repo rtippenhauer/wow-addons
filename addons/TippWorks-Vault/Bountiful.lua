@@ -1,6 +1,7 @@
 local _, ns = ...
+local TW = TippWorks
 
--- "Bountiful" tab: today's Bountiful Delves, read live from each zone's map
+-- Bountiful tab: today's Bountiful Delves, read live from each zone's map
 -- (the same delve markers the world map draws), with the version shown in
 -- the marker's tooltip, the closest flight point and a click-to-waypoint.
 local ROW_H, MAX_ROWS = 32, 12 -- two lines: name / version + flight point
@@ -54,8 +55,8 @@ function ns.DelveTooltipCount(pattern)
     foundAt[pattern] = GetTime()
     found[pattern] = nil
     if not (C_AreaPoiInfo and C_AreaPoiInfo.GetDelvesForMap) then return end
-    for _, zone in ipairs(ns.DELVE_ZONES) do
-        local map = ns.FindMapByName(zone)
+    for _, zone in ipairs(TW.DELVE_ZONES) do
+        local map = TW.FindMapByName(zone)
         for _, poi in ipairs(map and C_AreaPoiInfo.GetDelvesForMap(map) or {}) do
             local info = C_AreaPoiInfo.GetAreaPOIInfo(map, poi)
             for _, line in ipairs(info and TooltipLines(info) or {}) do
@@ -74,8 +75,8 @@ end
 local function Scan()
     wipe(list)
     if not (C_AreaPoiInfo and C_AreaPoiInfo.GetDelvesForMap) then return false end
-    for _, zone in ipairs(ns.DELVE_ZONES) do
-        local map = ns.FindMapByName(zone)
+    for _, zone in ipairs(TW.DELVE_ZONES) do
+        local map = TW.FindMapByName(zone)
         if map then
             for _, poi in ipairs(C_AreaPoiInfo.GetDelvesForMap(map) or {}) do
                 local info = C_AreaPoiInfo.GetAreaPOIInfo(map, poi)
@@ -120,11 +121,11 @@ function ns.CreateBountifulPage(parent, top)
         b.sub:SetWidth(ns.WIDTH - 40)
         b.sub:SetJustifyH("LEFT")
         b.sub:SetWordWrap(false)
-        b:SetScript("OnClick", function(self) if self.delve then ns.ActivateDelve(self.delve) end end)
+        b:SetScript("OnClick", function(self) if self.delve then TW.ActivateDelve(self.delve) end end)
         b:SetScript("OnEnter", function(self)
             local d = self.delve
             if not d then return end
-            local fp, yards = ns.ClosestFlightPoint(d)
+            local fp, yards = TW.ClosestFlightPoint(d)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:AddLine(d.name .. "  |cffffd100Bountiful|r")
             GameTooltip:AddLine(("%s  %.1f, %.1f"):format(d.zone, d.x, d.y), 1, 1, 1)
@@ -165,7 +166,7 @@ function ns.RefreshBountiful(force)
         local d = list[i]
         row.delve = d
         if d then
-            local fp = ns.ClosestFlightPoint(d)
+            local fp = TW.ClosestFlightPoint(d)
             row.name:SetText(d.name .. "  |cff888888" .. d.zone .. "|r")
             row.sub:SetText((d.variant and ("|cffffffff" .. d.variant .. "|r") or "|cff888888version: hover|r")
                 .. (fp and ("  |cff888888via " .. fp .. "|r") or ""))
@@ -177,7 +178,7 @@ function ns.RefreshBountiful(force)
     local shown = math.min(#list, MAX_ROWS)
     if #list == 0 then
         page.empty:SetText(supported
-            and "No Bountiful Delves found on the Midnight zone maps.\nOpen the world map once (or /crt map) if zone maps haven't loaded yet."
+            and "No Bountiful Delves found on the Midnight zone maps.\nOpen the world map once (or /tw map) if zone maps haven't loaded yet."
             or "This game version doesn't expose delve map markers to addons.")
         page.empty:Show()
     else

@@ -1,0 +1,22 @@
+## Interface: 120100, 120105, 120001, 120000
+## Title: |cffe6a23cTippenhauer Works|r - Coiled Rares
+## Notes: Coiled Isle daily rares (coffer key shards): kill tracking, route on the map, waypoints and a target popup.
+## Author: rtippenhauer (Tippenhauer Works)
+## Version: 1.0.0
+## X-Website: https://github.com/rtippenhauer/wow-addons
+## Category: Tippenhauer Works
+## Group: TippWorks-Core
+## Dependencies: TippWorks-Core
+## OptionalDeps: TomTom
+## SavedVariablesPerCharacter: CoiledRareTrackerDB
+## SavedVariables: CoiledRareTrackerAccountDB
+## IconTexture: Interface\Icons\Ability_Hunter_SniperShot
+## AddonCompartmentFunc: TippWorksRares_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: TippWorksRares_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: TippWorksRares_OnAddonCompartmentLeave
+
+Data.lua
+Rares.lua
+Route.lua
+Target.lua
+Bindings.xml

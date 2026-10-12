@@ -5,23 +5,21 @@ Repo: https://github.com/rtippenhauer/wow-addons
 
 ## Addons
 
+All of them sort together in the AddOns list under *Tippenhauer Works* and share one minimap
+button (the gear) and the `/tw` command. Install the ones you want. Each needs TippWorks-Core.
+
 | Folder | What it does | Commands |
 |---|---|---|
-| [TippWorks-Core](addons/TippWorks-Core/) | Required by every TippWorks addon: minimap launcher, `/tw help`, activity log | [`/tw`](addons/TippWorks-Core/README.md) |
+| [TippWorks-Core](addons/TippWorks-Core/) | Required by the others: minimap launcher, `/tw help`, activity log, delve travel help | [`/tw`](addons/TippWorks-Core/README.md) |
+| [TippWorks-Calls](addons/TippWorks-Calls/) | Delver's Call quests for levelling 80 → 90: pick up, run, hold, turn in | [`/tw calls`](addons/TippWorks-Calls/README.md) |
 | [TippWorks-Curios](addons/TippWorks-Curios/) | Curiosities and chests inside delves, with party sync, map pins and a guide arrow | [`/tw curios`](addons/TippWorks-Curios/README.md) |
-| [CoiledRareTracker](addons/CoiledRareTracker/) | Coiled Isle rares, Delver's Call levelling quests, level 90 weekly checklist, bountiful delves | `/crt`, see the [command list](addons/CoiledRareTracker/HANDOFF.md#slash-commands) |
+| [TippWorks-Vault](addons/TippWorks-Vault/) | Level 90 weekly gearing checklist and today's Bountiful Delves | [`/tw vault`](addons/TippWorks-Vault/README.md) |
+| [TippWorks-Rares](addons/TippWorks-Rares/) | Coiled Isle daily rares: kills, route on the map, target popup | [`/tw rares` or `/crt`](addons/TippWorks-Rares/README.md) |
 
-**Still to come:** the rest of CoiledRareTracker moves into the TippWorks family. They all sort
-together in the AddOns list under *Tippenhauer Works* and share one minimap button and `/tw`:
-
-| Planned folder | For | Command |
-|---|---|---|
-| TippWorks-Calls | Delver's Call quests to level 80 → 90 | `/tw calls` |
-| TippWorks-Vault | Level 90 weekly gearing: vault, coffer key shards, bountiful delves | `/tw vault` |
-| TippWorks-Rares | Coiled Isle daily rares and route (`/crt` still works) | `/tw rares` |
-
-When TippWorks-Rares arrives, the updater moves your saved kills and routes over and removes the
-old CoiledRareTracker folder. Exit WoW before running that update.
+**Coming from CoiledRareTracker?** It was split into the addons above. The updater copies your saved
+kills and routes to TippWorks-Rares and removes the old folder, and each new addon copies its own
+settings the first time it loads. **Exit WoW before running that update**; if WoW is open, the
+updater waits for you. `/crt` and its commands still work.
 
 ## Installing and updating
 
@@ -92,4 +90,4 @@ been pushed here.
 ## Developing
 
 See [CLAUDE.md](CLAUDE.md) for the release routine and
-[HANDOFF.md](addons/CoiledRareTracker/HANDOFF.md) for the addon internals.
+[docs/HANDOFF.md](docs/HANDOFF.md) for the addon internals.

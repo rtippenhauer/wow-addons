@@ -1,7 +1,7 @@
 # Tippenhauer Works WoW addons — notes for Claude
 
 Retail WoW (Midnight 12.x) addons by rtippenhauer (Rob). Repo: https://github.com/rtippenhauer/wow-addons.
-Played with Terry and Bill. Read `addons/CoiledRareTracker/HANDOFF.md` before touching Lua: it holds
+Played with Terry and Bill. Read `docs/HANDOFF.md` before touching Lua: it holds
 the hard-won in-game facts (secret values, secure buttons in combat, delve quirks).
 
 ## Layout
@@ -12,7 +12,14 @@ the hard-won in-game facts (secret values, secure buttons in combat, delve quirk
 - `install.settings.json` — per machine, gitignored. Template: `install.settings.example.json`.
 - `.claude/skills/install-wow-addon/` — the `/install-wow-addon` skill shared by Rob and Terry.
 
-## Brand conventions (TippWorks split in progress)
+## Addons
+TippWorks-Core (shared `TippWorks` global: log, Guard/Safe, module registry + `/tw`, launcher, `TW.CreateWindow`,
+delve travel in Atlas.lua), -Calls, -Curios, -Vault, -Rares. Rares keeps CoiledRareTracker's SavedVariables names
+(`CoiledRareTrackerDB`, `CoiledRareTrackerAccountDB`) and the target button's global name (key binding); the
+other addons copy their old settings from those once (`db.migrated`), so they list TippWorks-Rares and
+CoiledRareTracker in `## OptionalDeps`.
+
+## Brand conventions
 - Folders `TippWorks-<Name>`. Lua globals and SavedVariables use `TippWorks<Name>` (no hyphen).
 - `.toc`: `## Title: |cff<accent>Tippenhauer Works|r · <Name>`, `## Author: rtippenhauer (Tippenhauer Works)`,
   `## X-Website: https://github.com/rtippenhauer/wow-addons`, `## Category: Tippenhauer Works`,

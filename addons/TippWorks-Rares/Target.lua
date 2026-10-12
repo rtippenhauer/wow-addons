@@ -90,5 +90,5 @@ function ns.InitTargetButton()
     btn:Hide()
 end
 
-BINDING_HEADER_COILEDRARETRACKER = "Coiled Rare Tracker"
+BINDING_HEADER_COILEDRARETRACKER = "Tippenhauer Works - Coiled Rares"
 _G["BINDING_NAME_CLICK CoiledRareTrackerTargetButton:LeftButton"] = "Target spotted rare (+ skull)"
