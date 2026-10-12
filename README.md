@@ -7,16 +7,16 @@ Repo: https://github.com/rtippenhauer/wow-addons
 
 | Folder | What it does | Commands |
 |---|---|---|
-| [CoiledRareTracker](addons/CoiledRareTracker/) | Everything in one window today: Coiled Isle rares, Delver's Call levelling quests, the level 90 weekly checklist, bountiful delves, and the in-delve curiosities panel | `/crt` — see the [command list](addons/CoiledRareTracker/HANDOFF.md#slash-commands) |
+| [TippWorks-Core](addons/TippWorks-Core/) | Required by every TippWorks addon: minimap launcher, `/tw help`, activity log | [`/tw`](addons/TippWorks-Core/README.md) |
+| [TippWorks-Curios](addons/TippWorks-Curios/) | Curiosities and chests inside delves, with party sync, map pins and a guide arrow | [`/tw curios`](addons/TippWorks-Curios/README.md) |
+| [CoiledRareTracker](addons/CoiledRareTracker/) | Coiled Isle rares, Delver's Call levelling quests, level 90 weekly checklist, bountiful delves | `/crt`, see the [command list](addons/CoiledRareTracker/HANDOFF.md#slash-commands) |
 
-**Coming next:** CoiledRareTracker is being split into the **TippWorks** family. They will all sort
+**Still to come:** the rest of CoiledRareTracker moves into the TippWorks family. They all sort
 together in the AddOns list under *Tippenhauer Works* and share one minimap button and `/tw`:
 
 | Planned folder | For | Command |
 |---|---|---|
-| TippWorks-Core | Shared library, minimap launcher, `/tw help` | `/tw` |
 | TippWorks-Calls | Delver's Call quests to level 80 → 90 | `/tw calls` |
-| TippWorks-Curios | Curiosities and chests inside delves, with party sync | `/tw curios` |
 | TippWorks-Vault | Level 90 weekly gearing: vault, coffer key shards, bountiful delves | `/tw vault` |
 | TippWorks-Rares | Coiled Isle daily rares and route (`/crt` still works) | `/tw rares` |
 

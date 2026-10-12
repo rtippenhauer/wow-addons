@@ -3,7 +3,7 @@ local _, ns = ...
 -- The running version. Kept here, not just in the .toc, because WoW only
 -- re-reads the .toc on a full restart - after a /reload the .toc's number
 -- would still be the old one. Bump both together.
-ns.VERSION = "1.9.5"
+ns.VERSION = "1.10.0"
 
 -- Coordinates are the usual map percentages (as shown by TomTom / guides).
 -- Source: Method.gg / Icy Veins Coiled Isle rare guides (Midnight 12.1).
@@ -92,17 +92,6 @@ ns.FLIGHT_POINTS = {
     ["Voidstorm"] = {
         { "Howling Ridge", 51.14, 69.25 }, { "Locus Point", 42.27, 73.71 }, { "The Ingress", 36.91, 58.96 },
     },
-}
-
----------------------------------------------------------------------------
--- Delve pickups tracked on the "Curiosities" panel (matched against map
--- marker names, case-insensitive). Add a pattern here if one is missed.
----------------------------------------------------------------------------
-ns.CURIO_PATTERNS = {
-    { "curiosit", "Curiosity" },   -- Mislaid Curiosity
-    { "sturdy chest", "Sturdy Chest" },
-    { "heavy trunk", "Heavy Trunk" },
-    { "trove", "Trove" },
 }
 
 ---------------------------------------------------------------------------

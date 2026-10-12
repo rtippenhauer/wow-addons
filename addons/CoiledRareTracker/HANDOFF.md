@@ -1,7 +1,11 @@
 # Coiled Rare Tracker — handoff notes (for the next Claude session)
 
 World of Warcraft **Midnight (12.1, Season 2)** retail addon, built iteratively with Rob
-(Nectras on Zuluhed) and played with Terry (Ngoth). Current version: **1.9.5**.
+(Nectras on Zuluhed) and played with Terry (Ngoth). Current version: **1.10.0**.
+
+> **Being split into the TippWorks family** (see the repo README / CLAUDE.md). As of 1.10.0 the
+> delve curiosities panel lives in `addons/TippWorks-Curios` (needs `addons/TippWorks-Core`);
+> `/crt curios` and `/crt arrow` forward to `/tw curios`. The curiosity notes below still apply there.
 Nothing here could ever be run in game by Claude — every change was syntax-checked only,
 then verified by Rob in game via screenshots, `/crt log`, and the SavedVariables file.
 
@@ -40,7 +44,7 @@ then verified by Rob in game via screenshots, `/crt log`, and the SavedVariables
 | Route.lua | World-map route overlay + map buttons. |
 | Target.lua | Secure "Target: X" popup + Bindings. |
 | Delves.lua | Delver's Call tab, map-name lookup, waypoint/share/describe, `/crt calls`. |
-| Curios.lua | Delve curiosity panel, sync, pins, guide arrow, loot detection. |
+| ~~Curios.lua~~ | Moved to TippWorks-Curios (1.10.0). |
 | Weekly.lua | Weekly tab (currencies found by name, cached in `db.currencyIDs`). |
 | Bountiful.lua | Bountiful tab + `ns.DelveTooltipCount` (Gilded Stash probe). |
 | Minimap.lua | Minimap button + AddOns compartment entry. |

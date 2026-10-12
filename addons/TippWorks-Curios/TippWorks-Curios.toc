@@ -1,0 +1,17 @@
+## Interface: 120100, 120105, 120001, 120000
+## Title: |cffe6a23cTippenhauer Works|r - Curiosities
+## Notes: Delve curiosities, chests and troves: list, party sync, map pins and a guide arrow.
+## Author: rtippenhauer (Tippenhauer Works)
+## Version: 1.0.0
+## X-Website: https://github.com/rtippenhauer/wow-addons
+## Category: Tippenhauer Works
+## Group: TippWorks-Core
+## Dependencies: TippWorks-Core
+## OptionalDeps: CoiledRareTracker, TomTom
+## SavedVariablesPerCharacter: TippWorksCuriosDB
+## IconTexture: Interface\Icons\INV_Box_01
+## AddonCompartmentFunc: TippWorksCurios_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: TippWorksCurios_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: TippWorksCurios_OnAddonCompartmentLeave
+
+Curios.lua

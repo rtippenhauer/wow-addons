@@ -694,11 +694,14 @@ SlashCmdList.COILEDRARETRACKER = function(msg)
     cmd = (cmd or ""):lower()
     if cmd == "" or cmd == "show" or cmd == "toggle" then
         Toggle(cmd == "show" or nil)
-    elseif cmd == "curios" or cmd == "curiosities" then
-        local sub = rest:lower()
-        if sub == "reset" then ns.ResetCurioRun()
-        elseif sub == "scan" then ns.CurioScanReport()
-        else ns.ToggleCurios() end
+    elseif cmd == "curios" or cmd == "curiosities" or cmd == "arrow" then
+        -- The curiosities panel moved to the TippWorks-Curios addon (/tw curios).
+        local twCmd = (cmd == "arrow" and "curios arrow " or "curios ") .. rest
+        if TippWorks and TippWorks.modules.curios then
+            TippWorks.Command(twCmd)
+        else
+            Print("delve curiosities moved to the TippWorks-Curios addon (needs TippWorks-Core) - then use /tw " .. twCmd)
+        end
     elseif cmd == "delves" or cmd == "rares" or cmd == "weekly" or cmd == "bountiful" then
         Toggle(true)
         SelectTab(cmd)
@@ -733,8 +736,6 @@ SlashCmdList.COILEDRARETRACKER = function(msg)
         ns.PrintCalls()
     elseif cmd == "log" then
         ns.LogCommand(rest:lower())
-    elseif cmd == "arrow" then
-        ns.SetArrowMode(rest:lower())
     elseif cmd == "minimap" then
         ns.ToggleMinimapButton()
     elseif cmd == "stash" then
@@ -779,7 +780,7 @@ SlashCmdList.COILEDRARETRACKER = function(msg)
         Print("zone map id: " .. tostring(ZoneMap()))
         for _, z in ipairs(ns.DELVE_ZONES) do Print("  " .. z .. ": " .. tostring(ns.FindMapByName(z))) end
     else
-        Print("/crt - toggle | /crt calls - Delver's Call status | /crt log - activity log (/crt log clear) | /crt minimap - show/hide minimap button | /crt delves | /crt rares | /crt weekly | /crt bountiful | /crt curios (reset|scan) | /crt arrow auto|tomtom|own|both | /crt share group|say|guild|self | /crt portal <zone> - save a portal spot | /crt new - new route from here | /crt clearroute | /crt next | /crt route - show/hide map route | /crt unseen | /crt unlock - move the target popup | /crt mapbuttons - reset map button position | /crt autonext | /crt reset | /crt set <name> | /crt clear <name> | /crt auto | /crt map")
+        Print("/crt - toggle | /crt calls - Delver's Call status | /crt log - activity log (/crt log clear) | /crt minimap - show/hide minimap button | /crt delves | /crt rares | /crt weekly | /crt bountiful | curiosities: /tw curios (TippWorks-Curios) | /crt share group|say|guild|self | /crt portal <zone> - save a portal spot | /crt new - new route from here | /crt clearroute | /crt next | /crt route - show/hide map route | /crt unseen | /crt unlock - move the target popup | /crt mapbuttons - reset map button position | /crt autonext | /crt reset | /crt set <name> | /crt clear <name> | /crt auto | /crt map")
     end
 end
 
@@ -819,7 +820,6 @@ ev:SetScript("OnEvent", function(self, event, arg1)
         CreateMainFrame()
         ns.InitRoute()
         ns.InitTargetButton()
-        ns.InitCurios()
         ns.InitMinimap()
 
         self:RegisterEvent("PLAYER_ENTERING_WORLD")

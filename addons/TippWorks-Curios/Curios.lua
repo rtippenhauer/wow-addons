@@ -1,8 +1,25 @@
-local _, ns = ...
+local ADDON, ns = ...
+local TW = TippWorks
 
 -- Inside a delve: records every curiosity/chest map marker (once a reveal
 -- buff shows them map-wide they're all captured), keeps them for the run,
 -- and syncs who picked what up with party members running this addon.
+
+-- The running version. WoW only re-reads the .toc on a full restart, so the
+-- number lives here too. Bump both together.
+ns.VERSION = "1.0.0"
+ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
+
+-- Delve pickups tracked on the panel (matched against map marker names,
+-- case-insensitive). Add a pattern here if one is missed.
+ns.CURIO_PATTERNS = {
+    { "curiosit", "Curiosity" },   -- Mislaid Curiosity
+    { "sturdy chest", "Sturdy Chest" },
+    { "heavy trunk", "Heavy Trunk" },
+    { "trove", "Trove" },
+}
+
+-- Same prefix as the CoiledRareTracker versions, so mixed parties still sync.
 local PREFIX = "CRTCurio"
 local LOOT_RANGE = 15 -- yards: a marker vanishing this close means you took it
 local VIEW_RANGE = 200 -- markers drop out of view around 250 yd; beyond this a vanish means nothing
@@ -19,17 +36,7 @@ local me = UnitName("player")
 local addonUsers = {}
 local answered
 
-local function Safe(fn, ...)
-    local ok, a = pcall(fn, ...)
-    if not ok or (issecretvalue and issecretvalue(a)) then return nil end
-    return a
-end
-
-local function IsDelve()
-    if C_PartyInfo and C_PartyInfo.IsDelveInProgress and Safe(C_PartyInfo.IsDelveInProgress) then return true end
-    local _, instType, diff = GetInstanceInfo()
-    return instType == "scenario" and diff == 208
-end
+local Safe, IsDelve = TW.Safe, TW.IsDelve
 
 local function Kind(info)
     local name = info.name and info.name:lower()
@@ -234,7 +241,7 @@ local function DistTo(it)
 end
 
 -- Every distinct map marker in a delve is logged once per run, tracked or
--- not, so a pickup the addon misses shows up in /crt log under its real name.
+-- not, so a pickup the addon misses shows up in /tw log under its real name.
 local function NoteMarker(info, kind, hasPos)
     run.markers = run.markers or {}
     local name = (issecretvalue and issecretvalue(info.name)) and "<hidden by the game>" or tostring(info.name)
@@ -245,7 +252,7 @@ local function NoteMarker(info, kind, hasPos)
         hasPos and "" or " | game gave no map position")
 end
 
--- /crt curios scan: everything the game is showing right now.
+-- /tw curios scan: everything the game is showing right now.
 function ns.CurioScanReport()
     local map = C_Map.GetBestMapForUnit("player")
     local list = C_VignetteInfo and C_VignetteInfo.GetVignettes() or {}
@@ -390,7 +397,7 @@ function ns.SetArrowMode(mode)
         db.arrowMode = mode
         ns.Print("curiosity guide arrow: " .. mode .. (mode == "auto" and " (TomTom if installed, otherwise the addon's own)" or "") .. ".")
     else
-        ns.Print("curiosity guide arrow is '" .. (db.arrowMode or "auto") .. "'. Options: /crt arrow auto | tomtom | own | both"
+        ns.Print("curiosity guide arrow is '" .. (db.arrowMode or "auto") .. "'. Options: /tw curios arrow auto | tomtom | own | both"
             .. (TomTom and "  (TomTom is installed)" or "  (TomTom is not installed)"))
     end
 end
@@ -437,7 +444,7 @@ local function UpdateArrow()
 end
 
 local function CreateArrow()
-    arrow = CreateFrame("Button", "CoiledRareTrackerArrow", UIParent)
+    arrow = CreateFrame("Button", "TippWorksCuriosArrow", UIParent)
     arrow:SetSize(70, 90)
     local pos = db.arrowPos
     if pos then arrow:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4]) else arrow:SetPoint("TOP", UIParent, "TOP", 0, -200) end
@@ -452,7 +459,7 @@ local function CreateArrow()
     end)
     arrow:SetScript("OnClick", function() ClearArrow("arrow cleared.") end)
     arrow.tex = arrow:CreateTexture(nil, "ARTWORK")
-    arrow.tex:SetTexture("Interface\Minimap\MinimapArrow")
+    arrow.tex:SetTexture("Interface\\Minimap\\MinimapArrow")
     arrow.tex:SetSize(56, 56)
     arrow.tex:SetPoint("TOP")
     arrow.tex:SetVertexColor(1, 0.82, 0)
@@ -491,7 +498,7 @@ local function GuideTo(it)
     local viaTomTom = false
     if TomTom and TomTom.AddWaypoint and (db.arrowMode or "auto") ~= "own" then
         local ok, uid = pcall(TomTom.AddWaypoint, TomTom, it.map, it.x, it.y,
-            { title = it.name, persistent = false, crazy = true, from = "Coiled Rare Tracker" })
+            { title = it.name, persistent = false, crazy = true, from = "Tippenhauer Works" })
         if ok and uid then tomtomUID = uid; viaTomTom = true end
         ns.Log("CURIO", "TomTom waypoint for %s: %s", it.name, ok and (uid and "set" or "no waypoint returned") or ("error " .. tostring(uid)))
     end
@@ -614,7 +621,7 @@ function ns.RefreshCurios()
 end
 
 local function CreatePanel()
-    frame = CreateFrame("Frame", "CoiledRareTrackerCurios", UIParent, "BackdropTemplate")
+    frame = CreateFrame("Frame", "TippWorksCuriosPanel", UIParent, "BackdropTemplate")
     frame:SetSize(WIDTH, 100)
     frame:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -807,7 +814,6 @@ local function OnAddonMessage(prefix, msg, _, sender)
 end
 
 function ns.InitCurios()
-    db = ns.db
     C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
     CreatePanel()
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -858,5 +864,76 @@ function ns.InitCurios()
 end
 
 function ns.ToggleCurios()
+    if not frame then return end
     if frame:IsShown() then frame:Hide() else frame:Show(); ns.RefreshCurios() end
 end
+
+---------------------------------------------------------------------------
+-- TippWorks registration, /tw curios, saved data
+---------------------------------------------------------------------------
+local function Summary(tt)
+    if inDelve and run then
+        local mine = 0
+        for _, k in ipairs(run.order) do if run.items[k].looted[me] then mine = mine + 1 end end
+        tt:AddLine(("Curiosities: %d found, you have %d"):format(#run.order, mine), 1, 1, 1)
+    else
+        tt:AddLine("Curiosities: panel opens by itself in delves", 1, 1, 1)
+    end
+end
+
+local module
+local function Command(rest)
+    local sub, arg = rest:match("^(%S*)%s*(.-)$")
+    sub = (sub or ""):lower()
+    if sub == "" or sub == "show" or sub == "toggle" then ns.ToggleCurios()
+    elseif sub == "reset" then ns.ResetCurioRun()
+    elseif sub == "scan" then ns.CurioScanReport()
+    elseif sub == "arrow" then ns.SetArrowMode((arg or ""):lower())
+    else TW.ModuleHelp(module) end
+end
+
+module = TW.Register({
+    key = "curios", aliases = { "curiosities", "curio" },
+    name = "Delve Curiosities", addon = ADDON, version = ns.VERSION,
+    command = Command, toggle = ns.ToggleCurios, summary = Summary,
+    help = {
+        { "", "show/hide the curiosities panel (opens by itself in delves)" },
+        { "reset", "clear this delve's list" },
+        { "scan", "print every map marker the game shows right now" },
+        { "arrow auto|tomtom|own|both", "which guide arrow a row click uses" },
+    },
+})
+
+-- Blizzard's AddOns compartment (the menu button by the minimap); named in the .toc.
+function TippWorksCurios_OnAddonCompartmentClick() ns.ToggleCurios() end
+function TippWorksCurios_OnAddonCompartmentEnter(_, menuButton)
+    GameTooltip:SetOwner(menuButton, "ANCHOR_LEFT")
+    GameTooltip:AddLine("|cff" .. TW.COLOR .. "Tippenhauer Works|r - Delve Curiosities")
+    Summary(GameTooltip)
+    GameTooltip:AddLine("Click: show/hide  |  /tw curios help", 0.6, 0.6, 0.6)
+    GameTooltip:Show()
+end
+function TippWorksCurios_OnAddonCompartmentLeave() GameTooltip:Hide() end
+
+local loader = CreateFrame("Frame")
+loader:RegisterEvent("ADDON_LOADED")
+loader:SetScript("OnEvent", function(self, _, name)
+    if name ~= ADDON then return end
+    self:UnregisterEvent("ADDON_LOADED")
+    TippWorksCuriosDB = TippWorksCuriosDB or {}
+    db = TippWorksCuriosDB
+    -- One-time: carry settings and the current run over from CoiledRareTracker
+    -- (loaded first via OptionalDeps, so its saved data is already here).
+    if not db.migrated then
+        local old = CoiledRareTrackerDB
+        if type(old) == "table" then
+            for _, k in ipairs({ "arrowMode", "arrowPos", "curioPos", "curioRun" }) do
+                if db[k] == nil then db[k] = old[k] end
+            end
+            ns.Log("CURIO", "copied curiosity settings from CoiledRareTracker")
+        end
+        db.migrated = true
+    end
+    ns.Log("INFO", "TippWorks-Curios v%s loaded", ns.VERSION)
+    ns.InitCurios()
+end)
