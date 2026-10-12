@@ -1,7 +1,7 @@
 ---
 name: install-wow-addon
 description: Install or update the Tippenhauer Works WoW addons from the rtippenhauer/wow-addons GitHub repo (git pull + copy into the retail AddOns folder, with backups), or install any other addon from a .zip. Use when the user asks to install/update WoW addons, says an addon update was pushed, or provides an addon zip.
-argument-hint: "[addon name | path-to-addon.zip | --local]"
+argument-hint: "[addon name | path-to-addon.zip | --local | --ptr]"
 ---
 
 # Install / update WoW addons (Tippenhauer Works)
@@ -20,6 +20,10 @@ it on first run by finding WoW in the registry). Read it for the AddOns / backup
    ```
    - Addon name given (e.g. `TippWorks-Curios`): add `-Only <name>`.
    - `--local` (Rob's dev machine, testing before pushing): add `-NoPull` to install the working copy.
+   - `--ptr` (or `--xptr`, `--beta`): add `-Flavor ptr` (etc.) to install into that test client instead of live.
+     Usually combined with `--local`. If it says the install isn't found, the PTR must be installed from the
+     Battle.net launcher and started once. Remind the user the `.toc` `## Interface:` line needs the PTR's
+     interface number, or WoW lists the addon as out of date there.
    - Unsure what will happen: add `-DryRun` first.
 2. If it stops with **"Local changes in the repo"**: addons must not be edited on a player's machine.
    Show the user the listed files and ask before discarding them (`git checkout -- addons tools`).

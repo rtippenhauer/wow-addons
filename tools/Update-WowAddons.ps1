@@ -21,18 +21,24 @@
     Install just these addon folder names, e.g. -Only TippWorks-Curios
 .PARAMETER DryRun
     Show what would happen without changing anything.
+.PARAMETER Flavor
+    Which WoW install to update: _retail_ (default, or the "flavor" setting), _ptr_, _xptr_ ...
+    Short forms: ptr, xptr, beta. Backups for anything but retail go to a subfolder named after it.
 
 .EXAMPLE
     .\Update-WowAddons.cmd
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tools\Update-WowAddons.ps1 -NoPull -Only CoiledRareTracker
+.EXAMPLE
+    .\Update-WowAddons.cmd -Flavor ptr -NoPull      (try the working copy on the PTR)
 #>
 [CmdletBinding()]
 param(
     [switch]$NoPull,
     [switch]$Force,
     [string[]]$Only,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$Flavor
 )
 
 $ErrorActionPreference = 'Stop'
@@ -89,15 +95,24 @@ if (-not (Test-Path $SettingsPath)) {
 $settings = if (Test-Path $SettingsPath) { Read-Json $SettingsPath } else { Read-Json $ExamplePath }
 
 $wowPath   = Expand $settings.wowPath
-$flavor    = if ($settings.flavor) { $settings.flavor } else { '_retail_' }
+$flavor    = if ($Flavor) { $Flavor } elseif ($settings.flavor) { $settings.flavor } else { '_retail_' }
+$flavor    = '_' + $flavor.Trim('_').ToLower() + '_'   # "ptr" -> "_ptr_"
 $addonsDir = Join-Path (Join-Path (Join-Path $wowPath $flavor) 'Interface') 'AddOns'
 $wtfDir    = Join-Path (Join-Path $wowPath $flavor) 'WTF'
 $backupDir = Expand $(if ($settings.backupDir) { $settings.backupDir } else { '%USERPROFILE%\WoWAddonBackups' })
+if ($flavor -ne '_retail_') {
+    $backupDir = Join-Path $backupDir $flavor # keep test-realm backups apart from live ones
+    Say "Target: $flavor (not your live game)" 'Yellow'
+}
 $keep      = if ($settings.keepBackups) { [int]$settings.keepBackups } else { 10 }
 $wanted    = @($settings.addons | Where-Object { $_ })
 $excluded  = @($settings.exclude | Where-Object { $_ })
 $doPull    = (-not $NoPull) -and ($settings.pull -ne $false)
 
+if (-not (Test-Path $addonsDir) -and $flavor -ne '_retail_' -and (Test-Path $wowPath)) {
+    $have = (Get-ChildItem $wowPath -Directory | Where-Object { $_.Name -match '^_.+_$' } | ForEach-Object { $_.Name }) -join ', '
+    Fail "No $flavor install with an AddOns folder in $wowPath (found: $have).`n       Install it from the Battle.net launcher (game version dropdown) and start it once, then rerun."
+}
 if (-not (Test-Path $addonsDir)) {
     Fail "AddOns folder not found: $addonsDir`n       Fix wowPath in $SettingsPath (it should be the 'World of Warcraft' folder)."
 }

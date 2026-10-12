@@ -24,7 +24,9 @@ the hard-won in-game facts (secret values, secure buttons in combat, delve quirk
 Claude cannot run WoW. Every change is syntax-checked here and then verified in game by Rob.
 1. Change the code. Syntax-check every changed .lua (Lua 5.1 parser, e.g. `npx luaparse`).
 2. Bump the version in **both** the addon's `.toc` (`## Version`) and its `ns.VERSION`.
-3. Optionally test locally: `/install-wow-addon --local` (runs the updater with `-NoPull`).
+3. Optionally test locally: `/install-wow-addon --local` (runs the updater with `-NoPull`). Before a patch,
+   try it on the PTR with `/install-wow-addon --local --ptr` (`-Flavor ptr`). Add the PTR's interface number
+   to each `.toc` `## Interface:` line so WoW doesn't list the addon as out of date.
 4. Commit and push to `main`. The updater tells each player whether `/reload` is enough or a restart is needed.
 5. Offer to tell Terry's session (ListAgents / SendMessage): "TippWorks update pushed: <addons/versions>,
    run /install-wow-addon". Send only that notice, never code. Bill updates himself with `Update-WowAddons.cmd`.

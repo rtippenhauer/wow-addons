@@ -61,7 +61,9 @@ Every update after that: double-click **`Update-WowAddons.cmd`**.
 | `pull` | `false` = don't run `git pull` (install what's on disk) |
 
 Extra options for the command line: `Update-WowAddons.cmd -DryRun` (show what would change),
-`-Force` (reinstall everything), `-Only TippWorks-Curios`, `-NoPull`.
+`-Force` (reinstall everything), `-Only TippWorks-Curios`, `-NoPull`, and `-Flavor ptr` to install into
+the PTR (`_ptr_`) instead of the live game. The PTR has its own AddOns and saved data, and its backups
+go to a `_ptr_` subfolder.
 
 ### With Claude Code (Rob, Terry)
 
