@@ -1,0 +1,12 @@
+# Machine-specific installer settings (copied from install.settings.example.json on first run)
+install.settings.json
+
+# Build output / release zips
+dist/
+*.zip
+
+# OS / editor noise
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/

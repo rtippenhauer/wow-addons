@@ -1,0 +1,93 @@
+# Tippenhauer Works — WoW addons
+
+World of Warcraft **Midnight** (retail 12.x, Season 2) addons by **rtippenhauer**.
+Repo: https://github.com/rtippenhauer/wow-addons
+
+## Addons
+
+| Folder | What it does | Commands |
+|---|---|---|
+| [CoiledRareTracker](addons/CoiledRareTracker/) | Everything in one window today: Coiled Isle rares, Delver's Call levelling quests, the level 90 weekly checklist, bountiful delves, and the in-delve curiosities panel | `/crt` — see the [command list](addons/CoiledRareTracker/HANDOFF.md#slash-commands) |
+
+**Coming next:** CoiledRareTracker is being split into the **TippWorks** family. They will all sort
+together in the AddOns list under *Tippenhauer Works* and share one minimap button and `/tw`:
+
+| Planned folder | For | Command |
+|---|---|---|
+| TippWorks-Core | Shared library, minimap launcher, `/tw help` | `/tw` |
+| TippWorks-Calls | Delver's Call quests to level 80 → 90 | `/tw calls` |
+| TippWorks-Curios | Curiosities and chests inside delves, with party sync | `/tw curios` |
+| TippWorks-Vault | Level 90 weekly gearing: vault, coffer key shards, bountiful delves | `/tw vault` |
+| TippWorks-Rares | Coiled Isle daily rares and route (`/crt` still works) | `/tw rares` |
+
+When TippWorks-Rares arrives, the updater moves your saved kills and routes over and removes the
+old CoiledRareTracker folder. Exit WoW before running that update.
+
+## Installing and updating
+
+Every option below does the same thing. It pulls the latest version from GitHub, backs up the
+installed copy to `%USERPROFILE%\WoWAddonBackups`, and replaces the addon folders in
+`World of Warcraft\_retail_\Interface\AddOns`. Your saved data in the `WTF` folder is never
+changed or deleted.
+
+At the end it tells you what to do in game:
+- **"Type /reload"**: the update only changed code.
+- **"Exit WoW completely and start it again"**: the update added or removed files, or added a new
+  addon. WoW only reads the file list when it starts.
+
+### Without Claude (Bill)
+
+One-time setup:
+1. Install **Git for Windows**: https://git-scm.com/download/win (all the default options are fine).
+2. Open **PowerShell** and run:
+   ```powershell
+   cd $HOME\Documents
+   git clone https://github.com/rtippenhauer/wow-addons.git
+   ```
+3. Open `Documents\wow-addons` and double-click **`Update-WowAddons.cmd`**.
+   The first run finds your WoW folder and saves it in **`install.settings.json`**. If WoW is
+   somewhere unusual, open that file in Notepad and fix `wowPath`, then run it again.
+
+Every update after that: double-click **`Update-WowAddons.cmd`**.
+
+`install.settings.json` belongs to your machine. Updates never overwrite it, and git ignores it.
+
+| Setting | Meaning |
+|---|---|
+| `wowPath` | The `World of Warcraft` folder (not `_retail_`) |
+| `addons` | `["*"]` for all, or a list like `["TippWorks-Core", "TippWorks-Curios"]` |
+| `exclude` | Addons to skip |
+| `backupDir`, `keepBackups` | Where backups go and how many to keep per addon |
+| `pull` | `false` = don't run `git pull` (install what's on disk) |
+
+Extra options for the command line: `Update-WowAddons.cmd -DryRun` (show what would change),
+`-Force` (reinstall everything), `-Only TippWorks-Curios`, `-NoPull`.
+
+### With Claude Code (Rob, Terry)
+
+Start Claude Code **in your clone of this repo** and type:
+
+```
+/install-wow-addon
+```
+
+The skill ships with the repo (`.claude/skills/install-wow-addon`), so a `git clone` is all the
+setup needed. It runs the same updater and reports the result. It also still installs any other
+addon from a `.zip`: `/install-wow-addon C:\path\Addon.zip`.
+
+**Pushing an update to Terry:** Rob pushes to GitHub, then has his session message Terry's
+Claude session (both running with Remote Control) to say "update pushed". Claude treats a message
+from another session as a heads-up. It will ask Terry before installing unless Terry has
+pre-approved it. To pre-approve, Terry adds a line like this to his own `~/.claude/CLAUDE.md`
+(or tells Claude to remember it):
+
+> When Rob's Claude session says a Tippenhauer Works addon update was pushed, run
+> `/install-wow-addon` in my wow-addons clone without asking first.
+
+The skill only ever pulls from this GitHub repo. A message can never install code that hasn't
+been pushed here.
+
+## Developing
+
+See [CLAUDE.md](CLAUDE.md) for the release routine and
+[HANDOFF.md](addons/CoiledRareTracker/HANDOFF.md) for the addon internals.

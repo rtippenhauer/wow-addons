@@ -1,0 +1,9 @@
+{
+    "wowPath": "C:\\Program Files (x86)\\World of Warcraft",
+    "flavor": "_retail_",
+    "addons": ["*"],
+    "exclude": [],
+    "backupDir": "%USERPROFILE%\\WoWAddonBackups",
+    "keepBackups": 10,
+    "pull": true
+}

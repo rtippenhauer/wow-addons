@@ -1,0 +1,22 @@
+## Interface: 120100, 120105, 120001, 120000
+## Title: Coiled Rare Tracker
+## Notes: Coiled Isle daily rares (coffer key shards) + Delver's Call quest tracker.
+## Author: Rob
+## Version: 1.9.5
+## SavedVariablesPerCharacter: CoiledRareTrackerDB
+## SavedVariables: CoiledRareTrackerAccountDB
+## IconTexture: Interface\TargetingFrame\UI-RaidTargetingIcon_8
+## AddonCompartmentFunc: CoiledRareTracker_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: CoiledRareTracker_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: CoiledRareTracker_OnAddonCompartmentLeave
+
+Data.lua
+Log.lua
+Core.lua
+Route.lua
+Target.lua
+Delves.lua
+Curios.lua
+Weekly.lua
+Bountiful.lua
+Minimap.lua
