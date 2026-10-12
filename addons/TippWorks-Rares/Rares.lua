@@ -796,6 +796,18 @@ ev:SetScript("OnEvent", function(self, event, arg1)
         CreateMainFrame()
         ns.InitRoute()
         ns.InitTargetButton()
+        -- Options > AddOns > Tippenhauer Works > Coiled Rares (same as the /tw rares toggles)
+        if TW.AddCheckbox then
+            TW.AddCheckbox("Coiled Rares", "TW_RARES_AUTOSHOW", "Open by itself on the Coiled Isle",
+                "Show the rares window when you arrive on the Coiled Isle (never inside delves). /tw rares auto",
+                function() return db.autoShow end, function(v) db.autoShow = v end)
+            TW.AddCheckbox("Coiled Rares", "TW_RARES_AUTONEXT", "Waypoint to the next rare after a kill",
+                "After a kill, set a waypoint to the next rare on the route. /tw rares autonext",
+                function() return db.autoNext end, function(v) db.autoNext = v end)
+            TW.AddCheckbox("Coiled Rares", "TW_RARES_ROUTE", "Show the route on the world map",
+                "Draw the saved route and numbered pins on the Coiled Isle map. /tw rares route",
+                function() return db.showRoute end, function(v) db.showRoute = v; if ns.DrawRoute then ns.DrawRoute() end end)
+        end
 
         self:RegisterEvent("PLAYER_ENTERING_WORLD")
         self:RegisterEvent("ZONE_CHANGED_NEW_AREA")

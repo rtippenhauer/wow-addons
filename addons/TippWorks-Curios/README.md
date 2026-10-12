@@ -9,6 +9,13 @@ also tracks who has picked up which one.
   name, usually up close, the row takes it.
 - **Pickups the game never showed:** if you get a Boon with no known curiosity nearby, the addon
   adds a **Curiosity (picked up)** row where you stood, so your count stays right.
+- **Dundun:** when his marker shows up, you get a big on-screen warning and the raid-warning
+  sound, an orange **Dundun** row at the top of the panel, and the guide arrow switches to him and
+  follows him as he moves. His "hiding" announcement also triggers the warning. The alert and the
+  sound are separate settings, both on by default. To target and mark him, use Deep Delve's
+  "Find and mark Dundun" key binding.
+- **Game count:** the footer also shows "(game: N)". That's the game's own count of curiosities
+  you've collected this run, read from a hidden currency.
 - **Party sync:** party members running this addon share finds and pickups automatically.
   The footer shows who is synced and their version. A version in red means it doesn't match yours.
 - **Map pins:** the world map shows a green tick for picked up, gold for still there, grey for gone.
@@ -27,6 +34,10 @@ time you enter a delve; a `/reload` inside the delve keeps the current list.
 | `/tw curios scan` | Print every map marker the game is showing right now (for bug reports) |
 | `/tw curios arrow auto` | Use TomTom's arrow if TomTom is installed, otherwise the addon's own (default) |
 | `/tw curios arrow tomtom` / `own` / `both` | Choose the arrow yourself |
+| `/tw curios dundun` | Point the arrow at Dundun again |
+| `/tw curios alert on` / `off` | Dundun on-screen warning (on by default) |
+| `/tw curios sound on` / `off` | Dundun alert sound (on by default) |
+| `/tw settings` | Options → AddOns → Tippenhauer Works → Curiosities |
 
 You can also open the panel from the Tippenhauer Works minimap button or the AddOns menu.
 

@@ -5,7 +5,7 @@ and the **Tippenhauer Works minimap button**: a gear icon on the minimap edge, a
 AddOns menu by the minimap.
 
 - **Left-click** the button for a menu of your installed TippWorks addons.
-- **Right-click** it to print the command list.
+- **Right-click** it to print the command list. The menu also has **Settings**.
 - **Drag** it to move it around the minimap edge.
 
 | Command | What it does |
@@ -16,6 +16,7 @@ AddOns menu by the minimap.
 | `/tw log clear` | Empty the log |
 | `/tw minimap` | Show or hide the minimap button |
 | `/tw version` | Installed TippWorks addons and their versions |
+| `/tw settings` | Open the settings page: Options → AddOns → Tippenhauer Works |
 
 `/tippworks` works everywhere `/tw` does.
 

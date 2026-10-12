@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.3"
+ns.VERSION = "1.0.4"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -56,7 +56,15 @@ local VIGNETTE_KINDS = { [5482] = { "Curiosity", "Mislaid Curiosity" } }
 -- it's added where you stood, already picked up. Local only, never synced.
 local PICKUP, PICKUP_NAME = "Pickup", "Curiosity (picked up)"
 
-local function Syncable(it) return it.kind ~= UNKNOWN and it.kind ~= PICKUP end
+-- Dundun: walk over him for his Boon. Found by name, by creature id, or by a
+-- no-info marker whose id was seen on him before (remembered across runs).
+-- One row per run (he moves), local only, alert + guide arrow when spotted.
+local DUNDUN, DUNDUN_NPC = "Dundun", 242704
+
+-- The game's own curiosity counter: this currency ticks up once per pickup.
+local CURIO_CURRENCY = 3253
+
+local function Syncable(it) return it.kind ~= UNKNOWN and it.kind ~= PICKUP and it.kind ~= DUNDUN end
 
 local function VignetteID(guid)
     return Readable(guid) and type(guid) == "string"
@@ -68,13 +76,19 @@ local function Kind(info)
     local name = Readable(info.name) and type(info.name) == "string" and info.name or nil
     if name then
         local lower = name:lower()
+        if lower == "dundun" then return DUNDUN, name end
         for _, p in ipairs(ns.CURIO_PATTERNS) do
             if lower:find(p[1], 1, true) then return p[2], name end
         end
     end
     local guid = Safe(function() return info.objectGUID end)
-    local id = type(guid) == "string" and tonumber(guid:match("^GameObject%-%d+%-%d+%-%d+%-%d+%-(%d+)%-"))
-    local known = id and CURIO_OBJECT_IDS[id]
+    local typ, id
+    if type(guid) == "string" then
+        typ, id = guid:match("^(%a+)%-%d+%-%d+%-%d+%-%d+%-(%d+)%-")
+        id = tonumber(id)
+    end
+    if typ == "Creature" and id == DUNDUN_NPC then return DUNDUN, name or DUNDUN end
+    local known = typ == "GameObject" and CURIO_OBJECT_IDS[id]
     if known then return known[1], name or known[2] end
 end
 
@@ -214,7 +228,7 @@ local function AddItem(key, kind, name, map, x, y, ownGuid)
     it = { key = key, kind = kind, name = name, map = map, x = x, y = y, looted = {}, ownGuid = ownGuid or nil }
     it.wx, it.wy = World(map, x, y)
     run.items[key] = it
-    run.order[#run.order + 1] = key
+    if kind == DUNDUN then table.insert(run.order, 1, key) else run.order[#run.order + 1] = key end -- Dundun on top
     return it, true
 end
 
@@ -307,7 +321,8 @@ local function NoteUnnamed(vid, pos)
     if run.markers[k] then return end
     run.markers[k] = true
     ns.Log("MARKER", "<no info from the game> | vignette id %s | %.1f, %.1f | %s", tostring(vid), pos.x * 100, pos.y * 100,
-        IGNORED_VIGNETTES[vid] and "ignored" or ("listed as " .. (VIGNETTE_KINDS[vid] and VIGNETTE_KINDS[vid][2] or UNKNOWN_NAME)))
+        IGNORED_VIGNETTES[vid] and "ignored" or ("listed as " .. (db.dundunVignettes[vid] and DUNDUN
+            or VIGNETTE_KINDS[vid] and VIGNETTE_KINDS[vid][2] or UNKNOWN_NAME)))
 end
 
 local function MarkerPos(guid, map)
@@ -377,6 +392,7 @@ local function Scan()
             ns.Log("CURIO", "found %s at %.1f,%.1f (key: %s)", it.name, pos.x * 100, pos.y * 100,
                 weak and ("no info from the game, marker " .. key:match("^[^@]*")) or key:find("@", 1, true) and "name+position, GUID hidden" or "object GUID")
             if Syncable(it) then Broadcast(Encode(it, "F")) end
+            if it.kind == DUNDUN then ns.DundunSpotted(it) end
         end
         if it.gone then
             -- The marker only dropped out of view; it's still there.
@@ -393,7 +409,15 @@ local function Scan()
         if Readable(info) and info then
             local kind, name = Kind(info)
             NoteMarker(info, kind, pos ~= nil)
-            if kind and pos then
+            if kind == DUNDUN then
+                -- Remember his marker id: it may come back later with no info.
+                local vid = VignetteID(guid)
+                if vid and not IGNORED_VIGNETTES[vid] and not db.dundunVignettes[vid] then
+                    db.dundunVignettes[vid] = true
+                    ns.Log("DUNDUN", "his map marker is vignette id %d (remembered)", vid)
+                end
+                if pos then Track("dundun", DUNDUN, DUNDUN, pos) end
+            elseif kind and pos then
                 -- Object GUID is the same for everyone in the instance; fall
                 -- back to name + position if it is hidden.
                 local key = Safe(function() return info.objectGUID end)
@@ -405,7 +429,9 @@ local function Scan()
             local vid = VignetteID(guid)
             NoteUnnamed(vid, pos)
             local known = VIGNETTE_KINDS[vid]
-            if known then
+            if vid and db.dundunVignettes[vid] then
+                Track("dundun", DUNDUN, DUNDUN, pos)
+            elseif known then
                 Track(("%s@%.3f,%.3f"):format(known[2], pos.x, pos.y), known[1], known[2], pos, true)
             elseif not IGNORED_VIGNETTES[vid] then
                 Track(("unnamed@%.3f,%.3f"):format(pos.x, pos.y), UNKNOWN, UNKNOWN_NAME, pos, true)
@@ -597,6 +623,39 @@ local function GuideTo(it)
 end
 
 ---------------------------------------------------------------------------
+-- Dundun alert: big on-screen warning and/or sound (each on by default,
+-- /tw curios alert|sound on|off or Options > AddOns > Tippenhauer Works).
+---------------------------------------------------------------------------
+local function Alert(text)
+    if db.alert ~= false and RaidNotice_AddMessage and RaidWarningFrame then
+        pcall(RaidNotice_AddMessage, RaidWarningFrame, text, ChatTypeInfo and ChatTypeInfo.RAID_WARNING or { r = 1, g = 0.5, b = 0 })
+    end
+    if db.sound ~= false and PlaySound and SOUNDKIT then pcall(PlaySound, SOUNDKIT.RAID_WARNING, "Master") end
+    ns.Print(text)
+end
+
+-- His marker showed up: alert once per run and point the arrow at him (it
+-- follows him as his marker moves).
+function ns.DundunSpotted(it)
+    if run.dundunAlerted then return end
+    run.dundunAlerted = true
+    ns.Log("DUNDUN", "spotted at %.1f,%.1f", it.x * 100, it.y * 100)
+    Alert("|cffff8000Dundun spotted!|r Follow the arrow - walk over him for his Boon.")
+    GuideTo(it)
+end
+
+-- "Dundun is hiding..." and the like: he's in this delve, no position yet.
+local function DundunAnnounced(text, sender)
+    local t = Readable(text) and type(text) == "string" and text:lower() or ""
+    local s = Readable(sender) and type(sender) == "string" and sender:lower() or ""
+    if not (s == "dundun" or (t:find("dundun", 1, true) and t:find("hid", 1, true))) then return end
+    if run.dundunAnnounced then return end
+    run.dundunAnnounced = true
+    ns.Log("DUNDUN", "announced: %s", t ~= "" and t or s)
+    if not run.dundunAlerted then Alert("|cffff8000Dundun is in this delve!|r Watch for his marker - the arrow will point to him.") end
+end
+
+---------------------------------------------------------------------------
 -- Pickups from the loot itself. A marker can stay up (and keep sparkling)
 -- after you've looted it, so a vanishing marker alone misses pickups.
 ---------------------------------------------------------------------------
@@ -688,14 +747,22 @@ end
 
 function ns.RefreshCurios()
     if not frame or not run then return end
-    local total, mine = #run.order, 0
+    -- Counts are curiosities only (Dundun's row isn't one).
+    local total, mine = 0, 0
+    for _, k in ipairs(run.order) do
+        local it = run.items[k]
+        if it.kind ~= DUNDUN then
+            total = total + 1
+            if it.looted[me] then mine = mine + 1 end
+        end
+    end
     for i = 1, MAX_ROWS do
         local row, key = rows[i], run.order[i]
         local it = key and run.items[key]
         if it then
             local who = WhoText(it)
-            if it.looted[me] then mine = mine + 1 end
-            row.name:SetText(it.kind == UNKNOWN and ("|cffcc8cff" .. it.name .. "|r") or it.name)
+            row.name:SetText(it.kind == UNKNOWN and ("|cffcc8cff" .. it.name .. "|r")
+                or it.kind == DUNDUN and ("|cffff8000" .. it.name .. "|r") or it.name)
             local d = DistTo(it)
             local where = d and ("%d yd"):format(d) or ""
             if who ~= "" then
@@ -714,10 +781,6 @@ function ns.RefreshCurios()
             row:Hide()
         end
     end
-    for i = 1, total do
-        local it = run.items[run.order[i]]
-        if i > MAX_ROWS and it.looted[me] then mine = mine + 1 end
-    end
     local users = {}
     for n, v in pairs(addonUsers) do
         -- Red when a partner runs a different version than you.
@@ -725,10 +788,11 @@ function ns.RefreshCurios()
         users[#users + 1] = ("%s %s"):format(n, same and ("|cff888888v" .. v .. "|r")
             or ("|cffff5555" .. (v == "?" and "v?" or v == "older" and "old version" or ("v" .. v)) .. "|r"))
     end
-    frame.footer:SetText(("Found %d  |  you: %d%s"):format(total, mine,
+    frame.footer:SetText(("Found %d  |  you: %d%s%s"):format(total, mine,
+        run.gameCount and (" |cff888888(game: %d)|r"):format(run.gameCount) or "",
         #users > 0 and ("  |  synced: " .. table.concat(users, ", ")) or "  |  no party sync"))
-    frame:SetHeight(48 + math.max(1, math.min(total, MAX_ROWS)) * ROW_H + 24)
-    frame.empty:SetShown(total == 0)
+    frame:SetHeight(48 + math.max(1, math.min(#run.order, MAX_ROWS)) * ROW_H + 24)
+    frame.empty:SetShown(#run.order == 0)
     ns.DrawCurioPins()
 end
 
@@ -801,6 +865,10 @@ local function CreatePanel()
             GameTooltip:AddLine(who ~= "" and ("Picked up by: " .. who) or "Nobody (that we know of) has it yet", 1, 1, 1)
             if it.kind == PICKUP then
                 GameTooltip:AddLine("Counted from the Boon you received - the game never showed a marker for it.", 0.8, 0.8, 0.8, true)
+            end
+            if it.kind == DUNDUN then
+                GameTooltip:AddLine("Walk over him for his Boon. The arrow follows his marker while the game shows it.", 1, 0.5, 0, true)
+                GameTooltip:AddLine("To target and mark him, use Deep Delve's 'Find and mark Dundun' key binding.", 0.8, 0.8, 0.8, true)
             end
             if it.kind == UNKNOWN then
                 GameTooltip:AddLine("WoW shows a marker here but won't say what it is. Often a curiosity, but it can be"
@@ -941,6 +1009,9 @@ function ns.InitCurios()
     ev:RegisterEvent("GROUP_ROSTER_UPDATE")
     ev:RegisterEvent("LOOT_OPENED")
     ev:RegisterEvent("CHAT_MSG_LOOT")
+    ev:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+    for _, e in ipairs({ "CHAT_MSG_RAID_BOSS_EMOTE", "CHAT_MSG_RAID_BOSS_WHISPER", "CHAT_MSG_MONSTER_SAY",
+        "CHAT_MSG_MONSTER_YELL", "CHAT_MSG_MONSTER_WHISPER", "CHAT_MSG_MONSTER_EMOTE" }) do ev:RegisterEvent(e) end
     ev:SetScript("OnEvent", function(_, event, ...)
         if event == "PLAYER_ENTERING_WORLD" then
             local _, isReload = ...
@@ -960,6 +1031,17 @@ function ns.InitCurios()
             ns.Guard("curio loot msg", OnLootMessage, msg)
         elseif event == "GROUP_ROSTER_UPDATE" and inDelve then
             Broadcast("H|" .. ns.VERSION)
+        elseif event == "CURRENCY_DISPLAY_UPDATE" and inDelve and run then
+            local id, quantity, delta = ...
+            if Readable(id) and id == CURIO_CURRENCY and Readable(delta) and type(delta) == "number" and delta > 0 then
+                run.gameCount = (run.gameCount or 0) + delta
+                ns.Log("CURIO", "game's curiosity counter (currency %d) +%d -> %d this run (quantity %s)", id, delta,
+                    run.gameCount, Readable(quantity) and tostring(quantity) or "?")
+                ns.RefreshCurios()
+            end
+        elseif event:find("^CHAT_MSG_") and inDelve and run then
+            local text, sender = ...
+            ns.Guard("dundun chat", DundunAnnounced, text, sender)
         end
     end)
     if WorldMapFrame then
@@ -992,9 +1074,16 @@ end
 ---------------------------------------------------------------------------
 local function Summary(tt)
     if inDelve and run then
-        local mine = 0
-        for _, k in ipairs(run.order) do if run.items[k].looted[me] then mine = mine + 1 end end
-        tt:AddLine(("Curiosities: %d found, you have %d"):format(#run.order, mine), 1, 1, 1)
+        local found, mine = 0, 0
+        for _, k in ipairs(run.order) do
+            local it = run.items[k]
+            if it.kind ~= DUNDUN then
+                found = found + 1
+                if it.looted[me] then mine = mine + 1 end
+            end
+        end
+        tt:AddLine(("Curiosities: %d found, you have %d"):format(found, mine), 1, 1, 1)
+        if run.dundunAlerted then tt:AddLine("Dundun spotted this run", 1, 0.5, 0) end
     else
         tt:AddLine("Curiosities: panel opens by itself in delves", 1, 1, 1)
     end
@@ -1008,7 +1097,26 @@ local function Command(rest)
     elseif sub == "reset" then ns.ResetCurioRun()
     elseif sub == "scan" then ns.CurioScanReport()
     elseif sub == "arrow" then ns.SetArrowMode((arg or ""):lower())
+    elseif sub == "alert" or sub == "sound" then
+        local v = (arg or ""):lower()
+        if v == "on" then db[sub] = nil elseif v == "off" then db[sub] = false end
+        ns.Print(("Dundun %s: %s"):format(sub == "alert" and "on-screen alert" or "alert sound",
+            db[sub] == false and "OFF" or "ON") .. ((v ~= "on" and v ~= "off") and ("  (/tw curios " .. sub .. " on|off)") or ""))
+    elseif sub == "dundun" then
+        local it = run and run.items[(run.alias and run.alias.dundun) or "dundun"]
+        if it then GuideTo(it) else ns.Print("Dundun hasn't been spotted in this delve (yet).") end
     else TW.ModuleHelp(module) end
+end
+
+-- Options > AddOns > Tippenhauer Works > Curiosities
+local function AddSettings()
+    if not TW.AddCheckbox then return end
+    TW.AddCheckbox("Curiosities", "TW_CURIOS_ALERT", "Dundun: on-screen alert",
+        "Show a big warning when Dundun is spotted or announced in your delve.",
+        function() return db.alert ~= false end, function(v) if v then db.alert = nil else db.alert = false end end)
+    TW.AddCheckbox("Curiosities", "TW_CURIOS_SOUND", "Dundun: alert sound",
+        "Play the raid-warning sound when Dundun is spotted or announced.",
+        function() return db.sound ~= false end, function(v) if v then db.sound = nil else db.sound = false end end)
 end
 
 module = TW.Register({
@@ -1020,6 +1128,9 @@ module = TW.Register({
         { "reset", "clear this delve's list" },
         { "scan", "print every map marker the game shows right now" },
         { "arrow auto|tomtom|own|both", "which guide arrow a row click uses" },
+        { "dundun", "point the arrow at Dundun again (once he's been spotted)" },
+        { "alert on|off", "Dundun on-screen alert (default on)" },
+        { "sound on|off", "Dundun alert sound (default on)" },
     },
 })
 
@@ -1053,6 +1164,8 @@ loader:SetScript("OnEvent", function(self, _, name)
         end
         db.migrated = true
     end
+    db.dundunVignettes = db.dundunVignettes or {}
     ns.Log("INFO", "TippWorks-Curios v%s loaded", ns.VERSION)
     ns.InitCurios()
+    AddSettings()
 end)

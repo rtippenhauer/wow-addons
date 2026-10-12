@@ -30,6 +30,9 @@ you arrive on the Coiled Isle, but not inside delves.
 | `/tw rares mapbuttons` | Move the map buttons back to the bottom-left |
 | `/tw rares map` | Re-find the Coiled Isle map |
 
+The on/off options (`auto`, `autonext`, `route`) are also checkboxes in Options → AddOns →
+Tippenhauer Works → Coiled Rares (`/tw settings`).
+
 Everything after `/tw rares` also works after `/crt` (e.g. `/crt new`). Old commands like
 `/crt weekly` and `/crt curios` still work and open the new addons.
 

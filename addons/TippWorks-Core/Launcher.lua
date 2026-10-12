@@ -23,6 +23,7 @@ local function OpenMenu(owner)
         end
         root:CreateDivider()
         root:CreateButton("Activity log", function() TW.LogCommand("") end)
+        root:CreateButton("Settings", TW.OpenSettings)
         root:CreateButton("Help (/tw help)", TW.Help)
     end)
 end
@@ -97,9 +98,13 @@ function TW.InitLauncher()
     btn:SetShown(not TW.account.hideMinimap)
 end
 
+function TW.SetMinimapButtonShown(show)
+    TW.account.hideMinimap = (not show) or nil
+    btn:SetShown(show and true or false)
+end
+
 function TW.ToggleMinimapButton()
-    TW.account.hideMinimap = not TW.account.hideMinimap or nil
-    btn:SetShown(not TW.account.hideMinimap)
+    TW.SetMinimapButtonShown(TW.account.hideMinimap)
     TW.Print("minimap button " .. (TW.account.hideMinimap and "hidden (still in the AddOns menu by the minimap)." or "shown."))
 end
 
