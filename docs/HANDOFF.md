@@ -87,6 +87,21 @@ SavedVariables: `CoiledRareTrackerDB` (per character), `CoiledRareTrackerAccount
 - Rob (and party members not leader/assist) can't set raid marks in groups — logged as such.
 - Coffer Key Shards currency id 3310 (found by name), keys 3028, Voidcore 3418, Manaflux 3465.
 
+## Curiosities & Dundun - learned Oct 12 2026 (TippWorks-Curios 1.0.x)
+- **Not always 10 per delve**: Parhelion Plaza had 11 (game counter and Deep Delve agreed), Gnarldor Isle up to 20.
+  Never cap counts at 10.
+- **Currency 3253** ticks +1 per curiosity you collect (also at companion max level) - the most reliable count;
+  "you: N" uses it when it's ahead of the addon's own count.
+- **One copy of each curiosity per player** in a group (Creature 234564, sequential GUIDs at the same spot);
+  all clients see the same GUIDs. A spot holds at most as many copies as there are players.
+- **Map positions have no height**: stacked floors (Parhelion Plaza) put two curiosities on the same x,y.
+- Two distinct curiosities can be ~6 yd apart (The Darkway pair) - don't merge different own GUIDs by distance.
+- **Vignette 5482** (no info) = Mislaid Curiosity marker; it drops out of view at 70-90 yd (not "gone").
+  **6116** = Delver's Supplies. GameObject 455914 = the curiosity object (loot source).
+- **Dundun** (Creature 242704): no map marker seen so far, and target/mouseover/nameplate name+GUID are hidden
+  from addons in delves. First readable sign = his CHAT_MSG_MONSTER_SAY lines when you're near. Only a
+  key press (/targetexact Dundun, Deep Delve's Find & Mark) can target him earlier.
+
 ## Release routine (keep doing this)
 1. Change code. Syntax-check every .lua (e.g. `npx luaparse` / a Lua 5.1 parser).
 2. **Bump the version in BOTH** `Data.lua` (`ns.VERSION`) and the `.toc` (`## Version`).
