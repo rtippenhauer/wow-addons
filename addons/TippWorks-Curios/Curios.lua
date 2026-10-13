@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.6"
+ns.VERSION = "1.0.7"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -189,12 +189,28 @@ end
 -- Two different object GUIDs that this client sees itself are two curiosities,
 -- even side by side (The Darkway has a pair ~6 yd apart); they only fold
 -- together as per-player copies at the very same spot.
+-- The game spawns one copy per player, so a spot holds at most as many copies
+-- as there are players in the group; another object there is a different
+-- curiosity - e.g. on the floor above/below (Parhelion Plaza: map positions
+-- have no height, stacked curiosities land on the same x,y).
 local COPY_YARDS = 2
+local function PlayersInGroup()
+    local n = 1
+    for i = 1, 4 do
+        local unit = "party" .. i
+        local ok, isPlayer = pcall(UnitIsPlayer, unit)
+        if ok and Readable(isPlayer) and isPlayer and UnitExists(unit) then n = n + 1 end
+    end
+    return n
+end
+
 local function FindSame(name, map, x, y, kind, ownGuid)
     local wx, wy = World(map, x, y)
+    local maxCopies = ownGuid and PlayersInGroup()
     for _, k in ipairs(run.order) do
         local it = run.items[k]
-        if it.name == name or kind == UNKNOWN or it.kind == UNKNOWN then
+        local full = ownGuid and it.ownGuid and (it.guidCount or 1) >= maxCopies
+        if not full and (it.name == name or kind == UNKNOWN or it.kind == UNKNOWN) then
             local both = ownGuid and it.ownGuid
             local yards, mapDelta = both and COPY_YARDS or MERGE_YARDS, both and 0.002 or 0.01
             if wx and it.wx then
@@ -222,8 +238,12 @@ local function AddItem(key, kind, name, map, x, y, ownGuid)
         return same, true
     elseif same then
         run.alias[key] = same.key
-        if not quietMerge then ns.Log("CURIO", "%s arrived under a second key (%s) - merged with the one already listed",
-            name, key:find("@", 1, true) and "name+position" or "object GUID") end
+        if ownGuid and same.ownGuid then
+            same.guidCount = (same.guidCount or 1) + 1 -- another player's copy at this spot
+        elseif not quietMerge then
+            ns.Log("CURIO", "%s arrived under a second key (%s) - merged with the one already listed",
+                name, key:find("@", 1, true) and "name+position" or "object GUID")
+        end
         return same, false
     end
     it = { key = key, kind = kind, name = name, map = map, x = x, y = y, looted = {}, ownGuid = ownGuid or nil }
@@ -630,12 +650,52 @@ end
 -- Dundun alert: big on-screen warning and/or sound (each on by default,
 -- /tw curios alert|sound on|off or Options > AddOns > Tippenhauer Works).
 ---------------------------------------------------------------------------
-local function Alert(text)
-    if db.alert ~= false and RaidNotice_AddMessage and RaidWarningFrame then
-        pcall(RaidNotice_AddMessage, RaidWarningFrame, text, ChatTypeInfo and ChatTypeInfo.RAID_WARNING or { r = 1, g = 0.5, b = 0 })
+-- Big text in the middle of the screen for a few seconds (the raid-warning
+-- line at the top is easy to miss while the game's own dialog box is up).
+local banner
+local function ShowBanner(text)
+    if not banner then
+        banner = CreateFrame("Frame", "TippWorksCuriosBanner", UIParent)
+        banner:SetSize(900, 60)
+        banner:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+        banner:SetFrameStrata("HIGH")
+        banner.text = banner:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+        banner.text:SetAllPoints()
+        local font = banner.text:GetFont()
+        if font then banner.text:SetFont(font, 34, "THICKOUTLINE") end
+        banner:Hide()
     end
-    if db.sound ~= false and PlaySound and SOUNDKIT then pcall(PlaySound, SOUNDKIT.RAID_WARNING, "Master") end
+    banner.text:SetText(text)
+    banner:Show()
+    banner.shownAt = GetTime()
+    C_Timer.After(6, function() if banner.shownAt and GetTime() - banner.shownAt >= 5.9 then banner:Hide() end end)
+end
+
+-- Each part is logged, so "did it show?" can be answered from /tw log.
+local function Alert(text, short)
+    local shown, warned, sounded = "off", "off", "off"
+    if db.alert ~= false then
+        local ok, err = pcall(ShowBanner, short or text)
+        shown = ok and "ok" or ("failed: " .. tostring(err))
+        if RaidNotice_AddMessage and RaidWarningFrame then
+            local ok2, err2 = pcall(RaidNotice_AddMessage, RaidWarningFrame, text,
+                ChatTypeInfo and ChatTypeInfo.RAID_WARNING or { r = 1, g = 0.5, b = 0 })
+            warned = ok2 and "ok" or ("failed: " .. tostring(err2))
+        else
+            warned = "not available"
+        end
+    end
+    if db.sound ~= false then
+        if PlaySound and SOUNDKIT and SOUNDKIT.RAID_WARNING then
+            local ok, played = pcall(PlaySound, SOUNDKIT.RAID_WARNING, "Master")
+            sounded = ok and (played == false and "not played (sound off in game?)" or "ok") or ("failed: " .. tostring(played))
+        else
+            sounded = "not available"
+        end
+    end
     ns.Print(text)
+    ns.Log("ALERT", "%s | banner %s, raid warning %s, sound %s", (text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")),
+        shown, warned, sounded)
 end
 
 -- His marker showed up: alert once per run and point the arrow at him (it
@@ -644,7 +704,7 @@ function ns.DundunSpotted(it)
     if run.dundunAlerted then return end
     run.dundunAlerted = true
     ns.Log("DUNDUN", "spotted at %.1f,%.1f", it.x * 100, it.y * 100)
-    Alert("|cffff8000Dundun spotted!|r Follow the arrow - walk over him for his Boon.")
+    Alert("|cffff8000Dundun spotted!|r Follow the arrow - walk over him for his Boon.", "|cffff8000Dundun spotted!|r")
     GuideTo(it)
 end
 
@@ -667,9 +727,19 @@ local function DundunAnnounced(event, text, sender)
         run.dundunHeard[said] = true
         ns.Log("DUNDUN", "%s: %s", event, said)
     end
-    if run.dundunAnnounced then return end
-    run.dundunAnnounced = true
-    if not run.dundunAlerted then Alert("|cffff8000Dundun is in this delve!|r Watch for his marker - the arrow will point to him.") end
+    if run.dundunAlerted then return end -- already pointed at him on the map
+    if event:find("MONSTER") then
+        -- He only talks when you're close: "near you", once per run, even
+        -- after an earlier "in this delve" announcement.
+        if run.dundunNear then return end
+        run.dundunNear, run.dundunAnnounced = true, true
+        Alert("|cffff8000Dundun is near you!|r He just spoke - look around you.", "|cffff8000Dundun is near you!|r")
+    else
+        if run.dundunAnnounced then return end
+        run.dundunAnnounced = true
+        Alert("|cffff8000Dundun is in this delve!|r Watch for him - Deep Delve's Find & Mark key targets him in range.",
+            "|cffff8000Dundun is in this delve!|r")
+    end
 end
 
 -- Units (your target, mouseover, nameplates): Dundun can be targetable with no
@@ -697,7 +767,7 @@ local function UnitIsDundun(unit, why)
     end
     if not run.dundunAlerted then
         run.dundunAlerted = true
-        Alert("|cffff8000Dundun is near you!|r (" .. why .. ") Walk over him for his Boon.")
+        Alert("|cffff8000Dundun is near you!|r (" .. why .. ") Walk over him for his Boon.", "|cffff8000Dundun is near you!|r")
     end
 end
 ns.UnitIsDundun = UnitIsDundun
@@ -1171,6 +1241,8 @@ local function Command(rest)
         if v == "on" then db[sub] = nil elseif v == "off" then db[sub] = false end
         ns.Print(("Dundun %s: %s"):format(sub == "alert" and "on-screen alert" or "alert sound",
             db[sub] == false and "OFF" or "ON") .. ((v ~= "on" and v ~= "off") and ("  (/tw curios " .. sub .. " on|off)") or ""))
+    elseif sub == "testalert" then
+        Alert("|cffff8000Test:|r this is how the Dundun alert looks and sounds.", "|cffff8000Dundun alert test|r")
     elseif sub == "dundun" then
         local it = run and run.items[(run.alias and run.alias.dundun) or "dundun"]
         if it then GuideTo(it) else ns.Print("Dundun hasn't been spotted in this delve (yet).") end
@@ -1198,6 +1270,7 @@ module = TW.Register({
         { "scan", "print every map marker the game shows right now" },
         { "arrow auto|tomtom|own|both", "which guide arrow a row click uses" },
         { "dundun", "point the arrow at Dundun again (once he's been spotted)" },
+        { "testalert", "show and play the Dundun alert now, to check it" },
         { "alert on|off", "Dundun on-screen alert (default on)" },
         { "sound on|off", "Dundun alert sound (default on)" },
     },
