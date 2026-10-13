@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.7"
+ns.VERSION = "1.0.8"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -913,10 +913,12 @@ function ns.RefreshCurios()
     end
     -- The game's own counter (currency 3253) is exact; use it when it's ahead of ours.
     if run.gameCount and run.gameCount > mine then mine = run.gameCount end
-    frame.footer:SetText(("Found %d  |  you: %d%s%s"):format(total, mine,
+    -- Line 1: counts. Line 2: who's synced (a party of three doesn't fit on one line).
+    frame.footer:SetText(("Found %d  |  you: %d%s\n%s"):format(total, mine,
         run.gameCount and (" |cff888888(game: %d)|r"):format(run.gameCount) or "",
-        #users > 0 and ("  |  synced: " .. table.concat(users, ", ")) or "  |  no party sync"))
-    frame:SetHeight(48 + math.max(1, math.min(#run.order, MAX_ROWS)) * ROW_H + 24)
+        #users > 0 and ("synced: " .. table.concat(users, ", ")) or "|cff888888no party sync|r"))
+    local footerH = math.max(24, (tonumber(frame.footer:GetStringHeight()) or 24) + 10)
+    frame:SetHeight(48 + math.max(1, math.min(#run.order, MAX_ROWS)) * ROW_H + footerH)
     frame.empty:SetShown(#run.order == 0)
     ns.DrawCurioPins()
 end
@@ -1014,6 +1016,9 @@ local function CreatePanel()
 
     frame.footer = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     frame.footer:SetPoint("BOTTOMLEFT", 12, 10)
+    frame.footer:SetWidth(WIDTH - 24) -- wraps inside the panel instead of running past its edge
+    frame.footer:SetJustifyH("LEFT")
+    frame.footer:SetWordWrap(true)
     frame:Hide()
 end
 
