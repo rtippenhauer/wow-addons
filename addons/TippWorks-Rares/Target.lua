@@ -34,7 +34,7 @@ function ns.UpdateTargetButton()
     end
     if btn.rare ~= r then
         btn.rare = r
-        btn:SetAttribute("macrotext1", "/targetexact " .. r.name)
+        btn:SetAttribute("macrotext1", ns.TargetMacro(r))
         btn.label:SetText("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_8:16|t  Target: " .. r.name)
     end
     btn:Show()

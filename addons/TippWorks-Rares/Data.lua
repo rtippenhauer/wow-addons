@@ -3,7 +3,7 @@ local _, ns = ...
 -- The running version. Kept here, not just in the .toc, because WoW only
 -- re-reads the .toc on a full restart - after a /reload the .toc's number
 -- would still be the old one. Bump both together.
-ns.VERSION = "1.0.2"
+ns.VERSION = "1.0.3"
 
 -- Coordinates are the usual map percentages (as shown by TomTom / guides).
 -- Source: Method.gg / Icy Veins Coiled Isle rare guides (Midnight 12.1).

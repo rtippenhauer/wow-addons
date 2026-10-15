@@ -248,10 +248,11 @@ local function NextOnRoute()
     end
 end
 
-local function MarkKilled(name, silent)
+local function MarkKilled(name, silent, how)
     if db.killed[name] then return end
     db.killed[name] = time()
     db.absent[name] = nil
+    ns.Log("RARE", "%s killed (%s)", name, how or "unit seen dead")
     if not silent then Print(name .. " marked as killed for today.") end
     if db.autoNext then
         local r = NextOnRoute()
@@ -281,12 +282,41 @@ local function SpotUnit(unit)
 end
 
 -- Rares show as vignettes (the minimap skull/star) well before nameplate range.
+-- Kills from the map marker. Midnight often hides the target's name from addons
+-- in combat, so "target is dead" alone misses most kills. The marker itself is
+-- readable: it reports the rare dead, or it disappears right where you are.
+local VANISH_KILL_YARDS = 40
+local markerSeenAt = {} -- rare name -> GetTime() its map marker was last seen
+
 local function ScanPresence()
     if C_VignetteInfo and C_VignetteInfo.GetVignettes then
+        local seenNow = {}
         for _, guid in ipairs(C_VignetteInfo.GetVignettes() or {}) do
             local info = C_VignetteInfo.GetVignetteInfo(guid)
             local name = info and info.name
-            if name and not (issecretvalue and issecretvalue(name)) and byName[name] then Spotted(name) end
+            if name and not (issecretvalue and issecretvalue(name)) and byName[name] then
+                seenNow[name] = true
+                markerSeenAt[name] = GetTime()
+                local dead = info.isDead
+                if dead == true and not (issecretvalue and issecretvalue(dead)) then
+                    MarkKilled(name, false, "its map marker shows it dead")
+                else
+                    Spotted(name)
+                end
+            end
+        end
+        -- A marker seen moments ago that vanished right next to you: killed.
+        local pCont, pWorld = PlayerWorldPos()
+        for name, at in pairs(markerSeenAt) do
+            if not seenNow[name] then
+                markerSeenAt[name] = nil
+                if GetTime() - at < 5 and not db.killed[name] and pWorld then
+                    local d = DistanceTo(byName[name], pCont, pWorld)
+                    if d and d <= VANISH_KILL_YARDS then
+                        MarkKilled(name, false, ("its map marker vanished %d yd from you"):format(d))
+                    end
+                end
+            end
         end
     end
     for _, plate in ipairs(C_NamePlate.GetNamePlates() or {}) do
@@ -387,30 +417,21 @@ function ns.MakeRoute()
 end
 
 ---------------------------------------------------------------------------
--- Targeting + skull. Targeting is protected, so the row itself is a secure
--- /targetexact macro button; the skull is set afterwards from PostClick.
+-- Targeting + skull. Both are protected, so the row itself is a secure macro
+-- button that targets the rare and puts the skull on it (/tm). The addon never
+-- calls SetRaidTarget itself: in Midnight that is ADDON_ACTION_FORBIDDEN when it
+-- happens during the macro's own targeting (it broke the click's waypoint too).
 ---------------------------------------------------------------------------
-local function SkullIfTargeted(r, quiet)
-    local name = Safe(UnitName, "target")
-    if name ~= r.name then
-        if not quiet then Print(r.name .. " isn't in range to target yet.") end
-        return
-    end
-    if Safe(UnitIsDead, "target") then return end
-    if Safe(GetRaidTargetIndex, "target") ~= SKULL then
-        -- SetRaidTarget toggles when the icon is already set, hence the check above.
-        local ok, err = pcall(SetRaidTarget, "target", SKULL)
-        C_Timer.After(0.2, function()
-            ns.Log("MARK", "skull on %s: %s, icon now %s", r.name, ok and "called" or ("error " .. tostring(err)),
-                tostring(Safe(GetRaidTargetIndex, "target")))
-        end)
-    end
+-- Clear the mark first: /tm toggles, so a rare already wearing the skull
+-- would otherwise lose it.
+function ns.TargetMacro(r)
+    return ("/targetexact %s\n/tm [@target,exists,nodead] 0\n/tm [@target,exists,nodead] %d"):format(r.name, SKULL)
 end
 
--- Whenever you target a rare - by any means - it gets the skull.
-local function AutoSkullTarget()
-    local name = Safe(UnitName, "target")
-    if name and byName[name] then SkullIfTargeted(byName[name], true) end
+-- After the macro: say so if nothing could be targeted (the name itself may
+-- be hidden from addons, so only "is there a target" is checked).
+local function SkullIfTargeted(r)
+    if not UnitExists("target") then Print(r.name .. " isn't in range to target yet.") end
 end
 
 ns.SkullIfTargeted = SkullIfTargeted
@@ -423,7 +444,7 @@ local function SetRowRare(row, r)
     row.rare = r
     if InCombatLockdown() then return end
     row:SetAttribute("type1", "macro")
-    row:SetAttribute("macrotext1", "/targetexact " .. r.name)
+    row:SetAttribute("macrotext1", ns.TargetMacro(r))
 end
 
 ---------------------------------------------------------------------------
@@ -867,7 +888,6 @@ ev:SetScript("OnEvent", function(self, event, arg1)
         ns.UpdateTargetButton()
     elseif event == "PLAYER_TARGET_CHANGED" then
         CheckUnit("target")
-        AutoSkullTarget()
     else
         CheckUnit("target")
     end
