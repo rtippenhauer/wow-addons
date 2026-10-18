@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.5.2"
+ns.VERSION = "1.5.3"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -86,12 +86,20 @@ local ROOM_ENTER_RANGE = 0.015 -- standing this close to a sealed room's spot = 
 local KEY_NAME = "Archaic Amani Key"
 local ICON_KEY = "Interface\\Icons\\INV_Misc_Key_03"
 local ICON_LOCK = "Interface\\LFGFrame\\UI-LFG-ICON-LOCK"
-local ICON_MASK = "Interface\\Icons\\INV_Mask_01" -- unchecked hidden room: possible Hexmask
+local ICON_MASK = 135462 -- unchecked hidden room: possible Hexmask (same icon file HandyNotes_Midnight uses)
 local WIDTH, ROW_H = 330, 17
 
 local db, run, win
 local warband -- account-wide (TippWorksLabyrinthAccountDB): Sturdy Chests loot once per warband
 local rows = {}
+
+-- HandyNotes_Midnight already marks the Hexmask spots: then ours stay hidden
+-- unless /tw maze masks turns them on. (The key icon always shows.)
+local function MaskIconsShown()
+    if db.maskIcons ~= nil then return db.maskIcons end
+    local loaded = C_AddOns and C_AddOns.IsAddOnLoaded and Safe(C_AddOns.IsAddOnLoaded, "HandyNotes_Midnight")
+    return not loaded
+end
 
 ---------------------------------------------------------------------------
 -- Where am I
@@ -563,7 +571,7 @@ function ns.DrawPins()
     -- the locked room gets the key icon until it's opened.
     for _, c in ipairs(HIDDEN) do
         local state = run and run.rooms and run.rooms[c.name]
-        if not state then
+        if not state and MaskIconsShown() then
             Pin(c.spot[1], c.spot[2], c.name .. " - possible Hexmask",
                 "One of the five spots: 3 hold a Hexmask, 1 is the locked room, 1 is empty. Right-click it in the Labyrinth window if it's empty.",
                 nil, ICON_MASK)
@@ -850,6 +858,10 @@ local function Command(rest)
         ns.Refresh()
     elseif sub == "chests" then
         if win then win:SelectTab("chests"); win:Show() end
+    elseif sub == "masks" then
+        db.maskIcons = not MaskIconsShown()
+        Print("mask icons on the five hidden rooms " .. (db.maskIcons and "shown." or "hidden."))
+        ns.DrawPins()
     elseif sub == "padlocks" then
         db.showPadlocks = not db.showPadlocks or nil
         Print("padlocks on the Loa-sealed rooms " .. (db.showPadlocks and "shown." or "hidden (the game marks sealed doors itself)."))
@@ -876,6 +888,7 @@ module = TW.Register({
         { "chests", "open the Chests tab (Sturdy Chests, sealed rooms)" },
         { "door", "mark the locked door where you're standing (key icon on the map)" },
         { "pins", "show/hide the chest pins on the Labyrinth map" },
+        { "masks", "show/hide the mask icons on the hidden rooms (hidden while HandyNotes_Midnight is loaded)" },
         { "padlocks", "show/hide padlocks on the Loa-sealed rooms (off by default)" },
         { "reset", "start a fresh run list" },
     },
