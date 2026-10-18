@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.5.0"
+ns.VERSION = "1.5.1"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -903,11 +903,11 @@ ev:SetScript("OnEvent", function(self, event, ...)
         warband.chests = warband.chests or {}
         warband.chestLoot = warband.chestLoot or {}
         -- Before 1.5.0 chests were saved per character: merge them into the warband list.
+        -- Copied, not moved: after a /reload (no full restart) the warband file isn't saved yet.
         if db.chests or db.chestLoot then
             for n, t in pairs(db.chests or {}) do warband.chests[n] = warband.chests[n] or t end
             for n, l in pairs(db.chestLoot or {}) do warband.chestLoot[n] = warband.chestLoot[n] or l end
-            db.chests, db.chestLoot = nil, nil
-            TW.Log("MAZE", "chest list moved to the warband list")
+            TW.Log("MAZE", "chest list copied to the warband list")
         end
         db.rooms = db.rooms or {}
         run = db.run
