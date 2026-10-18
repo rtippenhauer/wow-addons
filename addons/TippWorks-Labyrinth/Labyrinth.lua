@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.3.1"
+ns.VERSION = "1.4.0"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -150,9 +150,34 @@ local function MarkChamber(c, state, how)
     ns.Refresh()
 end
 
+-- The five hidden rooms (three Hexmasks, the locked room, one empty).
+-- run.rooms[name] = "Fiery Hexmask" / "locked" / "opened" / "empty".
+local HIDDEN = {}
+for _, c in ipairs(CHAMBERS) do if c.spot then HIDDEN[#HIDDEN + 1] = c end end
+local SPOT_RANGE = 0.04 -- map fraction: this close to a hidden room = that room
+
+local function NearestHidden(x, y) -- x, y as map fractions (0..1)
+    local best, bestD
+    for _, c in ipairs(HIDDEN) do
+        local d = math.sqrt((x - c.spot[1] / 100) ^ 2 + (y - c.spot[2] / 100) ^ 2)
+        if not bestD or d < bestD then best, bestD = c, d end
+    end
+    if bestD and bestD <= SPOT_RANGE then return best end
+end
+
+local function HiddenHere()
+    local p = C_Map.GetPlayerMapPosition(MAZE_MAP, "player")
+    return p and NearestHidden(p.x, p.y)
+end
+
 local function MaskFound(m, how)
     if run.masks[m.key] then return end
-    local c = CurrentChamber()
+    local room = HiddenHere()
+    if room then
+        run.rooms = run.rooms or {}
+        run.rooms[room.name] = m.name
+    end
+    local c = room or CurrentChamber()
     run.masks[m.key] = c and c.name or "?"
     if c then run.spots[c.name] = m.name end
     TW.Log("MAZE", "%s found in %s (%s)", m.name, c and c.name or "an unknown chamber", how)
@@ -295,6 +320,8 @@ local function ScanMarkers()
                 local mp = Safe(C_VignetteInfo.GetVignettePosition, guid, MAZE_MAP)
                 if mp and Readable(mp.x) then run.door = { x = mp.x * 100, y = mp.y * 100 }
                 elseif c and c.spot then run.door = { x = c.spot[1], y = c.spot[2] } end
+                local room = run.door and NearestHidden(run.door.x / 100, run.door.y / 100)
+                if room then run.rooms = run.rooms or {}; run.rooms[room.name] = "locked" end
                 TW.Log("MAZE", "locked room marker: %s in %s (%s)", name, c and c.name or "?", where)
                 if not run.doorOpened then
                     Print("|cffffd100Locked door|r found" .. (c and (" in " .. c.name) or "") .. (run.hasKey and
@@ -502,6 +529,19 @@ function ns.DrawPins()
             Pin(ch[3], ch[4], ("Sturdy Chest %d"):format(ch[1]), ("%s  %.1f, %.1f"):format(ch[2], ch[3], ch[4]), "VignetteLoot")
         end
     end
+    -- The five hidden rooms: padlock until resolved (mask taken, found empty);
+    -- the locked room gets the key icon until it's opened.
+    for _, c in ipairs(HIDDEN) do
+        local state = run and run.rooms and run.rooms[c.name]
+        if not state then
+            Pin(c.spot[1], c.spot[2], c.name .. " - hidden room",
+                "A Hexmask, the locked room, or nothing. Right-click it in the Labyrinth window if it's empty.", nil, ICON_LOCK)
+        elseif state == "locked" and not run.doorOpened and not run.door then
+            Pin(c.spot[1], c.spot[2], c.name .. " - locked room",
+                run.hasKey and "You have the Archaic Amani Key - open it." or "Needs the Archaic Amani Key from the Keeper of the Key.",
+                nil, ICON_KEY)
+        end
+    end
     -- Locked door this run: key icon until it's opened.
     if run and run.door and not run.doorOpened then
         Pin(run.door.x, run.door.y, "Locked door",
@@ -554,6 +594,13 @@ local function Row(i)
             db.rooms[e.room] = (not db.rooms[e.room]) and time() or nil
             TW.Log("MAZE", "%s sealed room (%s) marked %s by hand", e.sealed[1], e.sealed[3], db.rooms[e.room] and "opened" or "locked")
             ns.Refresh()
+        elseif e.hidden and btn == "RightButton" then
+            run.rooms = run.rooms or {}
+            run.rooms[e.hidden.name] = (run.rooms[e.hidden.name] == nil) and "empty" or nil
+            TW.Log("MAZE", "hidden room %s marked %s by hand", e.hidden.name, run.rooms[e.hidden.name] or "not checked")
+            ns.Refresh()
+        elseif e.hidden then
+            ns.GuideTo(e.hidden.name .. " - hidden room", e.hidden.spot[1], e.hidden.spot[2])
         elseif e.door and btn == "RightButton" then
             run.doorOpened = not run.doorOpened or nil
             TW.Log("MAZE", "locked door marked %s by hand", run.doorOpened and "opened" or "not opened")
@@ -676,6 +723,20 @@ local function RunList()
     end
     local spots = {}
     for _, c in ipairs(CHAMBERS) do if c.special and run.spots[c.name] then spots[#spots + 1] = c.name .. ": " .. run.spots[c.name] end end
+    local resolved = 0
+    for _, c in ipairs(HIDDEN) do if run.rooms and run.rooms[c.name] then resolved = resolved + 1 end end
+    list[#list + 1] = Header(("Hidden rooms  %d/5 checked"):format(resolved))
+    for _, c in ipairs(HIDDEN) do
+        local state = run.rooms and run.rooms[c.name]
+        local text = not state and "|cff888888?  padlock|r"
+            or state == "locked" and (run.doorOpened and "|cff33ff33locked room - opened|r" or "|cffffd100locked room - key|r")
+            or state == "empty" and "|cff888888empty|r"
+            or ("|cff33ff33" .. state .. "|r")
+        list[#list + 1] = { hidden = c, left = "  " .. c.name, right = text,
+            tip = function() return { c.name .. " - hidden room", ("%.1f, %.1f"):format(c.spot[1], c.spot[2]),
+                "Holds a Hexmask, the locked room, or nothing this run.",
+                "Left-click: guide arrow  |  Right-click: mark empty / not checked" } end }
+    end
     list[#list + 1] = Header("Locked room" .. (run.keeperSeen and "  |cffffd100Keeper on map|r" or ""))
     list[#list + 1] = { door = true,
         left = "  Door" .. (run.door and ((" %.1f, %.1f"):format(run.door.x, run.door.y)) or " - not found yet"),
@@ -751,6 +812,8 @@ local function Command(rest)
         local p = C_Map.GetPlayerMapPosition(MAZE_MAP, "player")
         if not p or not InLabyrinth() then Print("stand at the locked door inside the Labyrinth, then try again.") return end
         run.door, run.lockedSeen, run.doorOpened = { x = p.x * 100, y = p.y * 100 }, true, nil
+        local room = NearestHidden(p.x, p.y)
+        if room then run.rooms = run.rooms or {}; run.rooms[room.name] = "locked" end
         TW.Log("MAZE", "locked door marked by hand at %.1f, %.1f", p.x * 100, p.y * 100)
         Print(("locked door marked at %.1f, %.1f - key icon on the map until it's opened."):format(p.x * 100, p.y * 100))
         ns.Refresh()
