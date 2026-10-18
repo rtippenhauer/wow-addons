@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.4.0"
+ns.VERSION = "1.4.1"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -246,6 +246,33 @@ local function CheckKey()
 end
 
 -- Standing inside a Loa-sealed room (at its spot): it's open for you from now on.
+-- The locked room holds several Mislaid Curiosities, visible on the map
+-- through the closed door. 3+ curiosities (from TippWorks-Curios' list) inside
+-- an unresolved hidden room = that's the locked room, before its door is seen.
+local LOCKED_CLUSTER = 3
+local function CheckCuriosityCluster()
+    local cr = TippWorksCuriosDB and TippWorksCuriosDB.curioRun
+    if type(cr) ~= "table" or type(cr.items) ~= "table" then return end
+    run.rooms = run.rooms or {}
+    for _, c in ipairs(HIDDEN) do
+        if not run.rooms[c.name] then
+            local n = 0
+            for _, it in pairs(cr.items) do
+                if type(it) == "table" and it.map == MAZE_MAP and it.kind ~= "Dundun" and type(it.x) == "number"
+                    and math.sqrt((it.x - c.spot[1] / 100) ^ 2 + (it.y - c.spot[2] / 100) ^ 2) <= SPOT_RANGE then
+                    n = n + 1
+                end
+            end
+            if n >= LOCKED_CLUSTER then
+                run.rooms[c.name] = "locked"
+                TW.Log("MAZE", "%s: %d curiosities behind one door - that's the locked room", c.name, n)
+                Print(("|cffffd100%s|r looks like this run's locked room (%d curiosities inside) - key icon on the map; find the Keeper of the Key."):format(c.name, n))
+                ns.Refresh()
+            end
+        end
+    end
+end
+
 local function CheckSealedRooms()
     local p = C_Map.GetPlayerMapPosition(MAZE_MAP, "player")
     if not p then return end
@@ -884,6 +911,7 @@ ev:SetScript("OnEvent", function(self, event, ...)
             TW.Guard("maze scan", function()
                 MarkChamber(CurrentChamber(), "here", "entered")
                 CheckSealedRooms()
+                CheckCuriosityCluster()
                 ScanMarkers()
                 ScanScenario()
             end)
