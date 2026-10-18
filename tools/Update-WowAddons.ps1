@@ -42,6 +42,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# "-Only A,B" arrives as one string when run via -File / the .cmd: split it.
+if ($Only) { $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 $RepoRoot     = Split-Path -Parent $PSScriptRoot
 $SourceRoot   = Join-Path $RepoRoot 'addons'
 $SettingsPath = Join-Path $RepoRoot 'install.settings.json'
@@ -133,6 +135,7 @@ if ($doPull) {
         Fail "Addons must not be edited on this machine - changes go through GitHub.`n       Undo them with: git -C `"$RepoRoot`" checkout -- addons tools"
     }
     Say "Pulling latest from GitHub..."
+    $scriptHash = (Get-FileHash $PSCommandPath -Algorithm MD5).Hash
     $before = git -C $RepoRoot rev-parse HEAD 2>$null
     git -C $RepoRoot pull --ff-only
     if ($LASTEXITCODE -ne 0) { Fail "git pull failed (see above). Nothing was installed." }
@@ -140,6 +143,18 @@ if ($doPull) {
     if ($before -and $before -ne $after) {
         Say "Changes pulled:" 'Cyan'
         git -C $RepoRoot log --oneline "$before..$after" | ForEach-Object { Say "  $_" }
+    }
+    # The pull updated this script itself: finish with the new version, so its
+    # fixes apply to this run too (not only from the next one).
+    if ((Get-FileHash $PSCommandPath -Algorithm MD5).Hash -ne $scriptHash) {
+        Say "The updater itself was updated - continuing with the new version..." 'Cyan'
+        $forward = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-NoPull')
+        if ($Force) { $forward += '-Force' }
+        if ($DryRun) { $forward += '-DryRun' }
+        if ($Flavor) { $forward += @('-Flavor', $Flavor) }
+        if ($Only) { $forward += '-Only'; $forward += ($Only -join ',') }
+        & powershell @forward
+        exit $LASTEXITCODE
     }
 }
 
