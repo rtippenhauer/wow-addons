@@ -13,3 +13,6 @@ desktop.ini
 
 # Browser tool scratch files
 .playwright-mcp/
+
+# Updater state (pending restart), per machine
+install.state.*.json

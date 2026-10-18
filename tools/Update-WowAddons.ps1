@@ -292,6 +292,30 @@ if ($renames.Count -gt 0) {
     }
 }
 
+# ---------------------------------------------------------------- pending restart
+# An earlier run may have installed something that needs a full restart. If WoW
+# is still the same session that was running then, this run's "/reload" isn't
+# enough either. Remembered per machine in install.state.<flavor>.json (gitignored).
+$statePath = Join-Path $RepoRoot ("install.state." + $flavor.Trim('_') + ".json")
+$wowStart = Get-Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.ProcessName -in 'Wow', 'WowT', 'WowB', 'Wow-64' } |
+    ForEach-Object { try { $_.StartTime.ToUniversalTime() } catch { $null } } |
+    Where-Object { $_ } | Sort-Object | Select-Object -First 1
+$stillPending = $false
+if (-not $DryRun) {
+    if ($needRestart) {
+        @{ restartPendingAt = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content $statePath -Encoding ASCII
+    } elseif (Test-Path $statePath) {
+        $pendingAt = $null
+        try { $pendingAt = [DateTime]::Parse((Read-Json $statePath).restartPendingAt).ToUniversalTime() } catch {}
+        if ($pendingAt -and $wowStart -and $wowStart -lt $pendingAt) {
+            $needRestart = $true; $stillPending = $true
+        } else {
+            Remove-Item $statePath -Force   # WoW was restarted (or is closed): the next start loads everything
+        }
+    }
+}
+
 # ---------------------------------------------------------------- report
 Say ""
 $results | Format-Table -AutoSize | Out-String | ForEach-Object { Write-Host $_.TrimEnd() }
@@ -302,7 +326,9 @@ if ($blocked.Count -gt 0) {
         (($blocked.Keys) -join ', '), (($blocked.Values) -join ', ')) 'Yellow'
 } elseif (-not $changed) {
     Say "Everything is already up to date." 'Green'
+    if ($stillPending) { Say "But WoW hasn't been restarted since an earlier update that needs it: exit WoW completely and start it again." 'Yellow' }
 } elseif ($needRestart) {
+    if ($stillPending) { Say "An earlier update still needs a restart (WoW has been running since before it)." 'Yellow' }
     Say "Exit WoW completely and start it again (new/removed files or .toc changes - /reload is NOT enough)." 'Yellow'
 } else {
     Say "Type /reload in game." 'Green'
