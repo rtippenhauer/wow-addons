@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.0"
+ns.VERSION = "1.0.1"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -194,8 +194,41 @@ local function ScanMarkers()
     end
 end
 
--- Quests picked up in the Labyrinth: shown with their objectives; a click
--- tracks it and points the way (the game's own next-step waypoint).
+-- Labyrinth quests: everything your quest log files under the "The Labyrinth
+-- of Kindo'jan" heading (however long ago, wherever you are now), plus any
+-- quest picked up while inside. Shown with their objectives; a click tracks it
+-- and points the way (the game's own next-step waypoint).
+local logQuests = {}  -- questID -> title, from the quest log heading
+local loggedQuest = {} -- questID -> true once written to /tw log
+local function ScanQuestLog()
+    wipe(logQuests)
+    local n = Safe(C_QuestLog.GetNumQuestLogEntries) or 0
+    local header
+    for i = 1, n do
+        local info = Safe(C_QuestLog.GetInfo, i)
+        if type(info) == "table" and Readable(info.title) then
+            if info.isHeader then
+                header = info.title
+            elseif header and (header:find("Labyrinth", 1, true) or header:find("Kindo", 1, true)) and Readable(info.questID) then
+                logQuests[info.questID] = info.title
+                if not loggedQuest[info.questID] then
+                    loggedQuest[info.questID] = true
+                    TW.Log("MAZE", "Labyrinth quest in your log: %s (%d)", info.title, info.questID)
+                end
+            end
+        end
+    end
+end
+
+local function AllQuests()
+    local all = {}
+    for id, t in pairs(logQuests) do all[id] = t end
+    for id, t in pairs(run and run.quests or {}) do
+        if Safe(C_QuestLog.GetLogIndexForQuestID, id) then all[id] = all[id] or t end -- still in your log
+    end
+    return all
+end
+
 local function QuestPicked(questID)
     if not Readable(questID) or not run then return end
     local title = Safe(C_QuestLog.GetTitleForQuestID, questID) or ("quest " .. questID)
@@ -216,7 +249,7 @@ end
 
 local function GuideQuest(questID)
     if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then pcall(C_SuperTrack.SetSuperTrackedQuestID, questID) end
-    local title = run.quests[questID] or tostring(questID)
+    local title = AllQuests()[questID] or tostring(questID)
     Print("|cffffd100" .. title .. "|r - tracked, follow the quest arrow.")
     for _, l in ipairs(QuestText(questID)) do Print("  " .. l) end
     local wp = C_QuestLog.GetNextWaypointText and Safe(C_QuestLog.GetNextWaypointText, questID)
@@ -296,7 +329,8 @@ function ns.Refresh()
     if not win or not run or not win:IsShown() then return end
     local list = {}
     local here = CurrentChamber()
-    list[#list + 1] = Header(("Chambers  %d/9  |cff888888(rewards at 3, 6, 9)|r"):format(DoneCount()))
+    list[#list + 1] = Header(("Chambers  %d/9  |cff888888%s|r"):format(DoneCount(),
+        InLabyrinth() and "(rewards at 3, 6, 9)" or "(your last run)"))
     for _, c in ipairs(CHAMBERS) do
         local st = run.chambers[c.name]
         list[#list + 1] = { chamber = c,
@@ -324,7 +358,7 @@ function ns.Refresh()
     list[#list + 1] = Header("Locked room" .. (run.lockedSeen and " |cff33ff33seen|r" or "") ..
         (run.keeperSeen and "  |cffffd100Keeper on map|r" or ""))
     local qn = 0
-    for id, title in pairs(run.quests) do
+    for id, title in pairs(AllQuests()) do
         if qn == 0 then list[#list + 1] = Header("Quests from the Labyrinth") end
         qn = qn + 1
         local done = Safe(C_QuestLog.IsComplete, id)
@@ -410,7 +444,7 @@ ev:SetScript("OnEvent", function(self, event, ...)
         TW.Log("INFO", "TippWorks-Labyrinth v%s loaded", ns.VERSION)
         CreateWindow()
         for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA",
-            "SCENARIO_CRITERIA_UPDATE", "SCENARIO_UPDATE", "UNIT_AURA", "QUEST_ACCEPTED", "QUEST_LOG_UPDATE",
+            "SCENARIO_CRITERIA_UPDATE", "SCENARIO_UPDATE", "UNIT_AURA", "QUEST_ACCEPTED", "QUEST_LOG_UPDATE", "QUEST_REMOVED",
             "CHAT_MSG_LOOT" }) do self:RegisterEvent(e) end
         C_Timer.NewTicker(1, function()
             if not inside then return end
@@ -423,6 +457,7 @@ ev:SetScript("OnEvent", function(self, event, ...)
         return
     end
     if event == "PLAYER_ENTERING_WORLD" then
+        TW.Guard("maze quest log", ScanQuestLog)
         local _, isReload = ...
         local now = InLabyrinth()
         if now and not inside then
@@ -434,6 +469,13 @@ ev:SetScript("OnEvent", function(self, event, ...)
         inside = now
         return
     end
+    -- Quests matter everywhere: you finish them outside the Labyrinth.
+    if event == "QUEST_LOG_UPDATE" or event == "QUEST_ACCEPTED" or event == "QUEST_REMOVED" then
+        TW.Guard("maze quest log", ScanQuestLog)
+        if event == "QUEST_ACCEPTED" and inside then TW.Guard("maze quest", QuestPicked, select(1, ...)) end
+        ns.Refresh()
+        return
+    end
     if not inside or not run then return end
     if event:find("^ZONE_CHANGED") then
         local c = CurrentChamber()
@@ -441,8 +483,6 @@ ev:SetScript("OnEvent", function(self, event, ...)
         TW.Guard("maze zone", MarkChamber, c, "here", "entered")
     elseif event == "UNIT_AURA" then
         if ... == "player" then TW.Guard("maze auras", ScanAuras) end
-    elseif event == "QUEST_ACCEPTED" then
-        TW.Guard("maze quest", QuestPicked, select(1, ...))
     elseif event == "CHAT_MSG_LOOT" then
         local msg = ...
         if Readable(msg) then

@@ -12,8 +12,10 @@ For the Labyrinth of Kindo'jan, the 12.1.5 mega-delve. The window opens by itsel
   Jan'alai's Refuge and Nalorakk's Rest.
 - **Locked room:** says when the **Keeper of the Key** shows up on the map (it drops the Archaic Amani
   Key) and when you have the key.
-- **Quests from the Labyrinth:** any quest you pick up inside, e.g. from a mask, is listed with its
-  objectives. Click it to track it, see the next step, and get a waypoint to where the game says to go.
+- **Quests from the Labyrinth:** every quest your quest log files under the *The Labyrinth of
+  Kindo'jan* heading, e.g. the one from a mask, plus anything picked up inside. It doesn't matter
+  when you picked it up or where you are now; `/tw maze` shows them anywhere. Click one to track it,
+  see the next step, and get a waypoint to where the game says to go to finish it.
 
 | Command | What it does |
 |---|---|
