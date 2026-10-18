@@ -1,0 +1,17 @@
+## Interface: 120100, 120105, 120001, 120000
+## Title: |cffe6a23cTippenhauer Works|r - Labyrinth
+## Notes: Labyrinth of Kindo'jan: chambers done this run, the three Hexmasks, the locked room and help with quests picked up inside.
+## Author: rtippenhauer (Tippenhauer Works)
+## Version: 1.0.0
+## X-Website: https://github.com/rtippenhauer/wow-addons
+## Category: Tippenhauer Works
+## Group: TippWorks-Core
+## Dependencies: TippWorks-Core
+## OptionalDeps: TomTom
+## SavedVariablesPerCharacter: TippWorksLabyrinthDB
+## IconTexture: Interface\Icons\INV_Misc_Map02
+## AddonCompartmentFunc: TippWorksLabyrinth_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: TippWorksLabyrinth_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: TippWorksLabyrinth_OnAddonCompartmentLeave
+
+Labyrinth.lua
