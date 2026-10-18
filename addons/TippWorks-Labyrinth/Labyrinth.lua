@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.5.3"
+ns.VERSION = "1.5.4"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -175,6 +175,21 @@ local function NearestHidden(x, y) -- x, y as map fractions (0..1)
     if bestD and bestD <= SPOT_RANGE then return best end
 end
 
+-- Only ONE room per run is the locked room, and a room where you took a mask
+-- never is. Returns true if this room was marked.
+local function MarkLocked(room, why)
+    if not room then return false end
+    run.rooms = run.rooms or {}
+    for name, state in pairs(run.rooms) do
+        if state == "locked" then return name == room.name end -- already known
+    end
+    local state = run.rooms[room.name]
+    if state and state ~= "empty" then return false end -- a mask was taken here
+    run.rooms[room.name] = "locked"
+    TW.Log("MAZE", "%s is this run's locked room (%s)", room.name, why)
+    return true
+end
+
 local function HiddenHere()
     local p = C_Map.GetPlayerMapPosition(MAZE_MAP, "player")
     return p and NearestHidden(p.x, p.y)
@@ -273,9 +288,7 @@ local function CheckCuriosityCluster()
                     n = n + 1
                 end
             end
-            if n >= LOCKED_CLUSTER then
-                run.rooms[c.name] = "locked"
-                TW.Log("MAZE", "%s: %d curiosities behind one door - that's the locked room", c.name, n)
+            if n >= LOCKED_CLUSTER and MarkLocked(c, n .. " curiosities behind one door") then
                 Print(("|cffffd100%s|r looks like this run's locked room (%d curiosities inside) - key icon on the map; find the Keeper of the Key."):format(c.name, n))
                 ns.Refresh()
             end
@@ -348,7 +361,9 @@ local function ScanMarkers()
                 Print("|cffffd100Keeper of the Key|r is on the map (" .. where .. ") - it drops the key for the locked room.")
             end
             local lower = name:lower()
-            if (lower:find("locked", 1, true) or lower:find("door", 1, true)) and not run.lockedSeen then
+            local message = name:find('^"') or lower:find("unlocked", 1, true) or lower:find("seal", 1, true)
+                or lower:find("path", 1, true)
+            if not message and (lower:find("locked", 1, true) or lower:find("door", 1, true)) and not run.lockedSeen then
                 run.lockedSeen = true
                 local c = CurrentChamber()
                 if c and c.special then run.spots[c.name] = "Locked room" end
@@ -357,8 +372,7 @@ local function ScanMarkers()
                 local mp = Safe(C_VignetteInfo.GetVignettePosition, guid, MAZE_MAP)
                 if mp and Readable(mp.x) then run.door = { x = mp.x * 100, y = mp.y * 100 }
                 elseif c and c.spot then run.door = { x = c.spot[1], y = c.spot[2] } end
-                local room = run.door and NearestHidden(run.door.x / 100, run.door.y / 100)
-                if room then run.rooms = run.rooms or {}; run.rooms[room.name] = "locked" end
+                MarkLocked(run.door and NearestHidden(run.door.x / 100, run.door.y / 100), "its door marker")
                 TW.Log("MAZE", "locked room marker: %s in %s (%s)", name, c and c.name or "?", where)
                 if not run.doorOpened then
                     Print("|cffffd100Locked door|r found" .. (c and (" in " .. c.name) or "") .. (run.hasKey and
@@ -851,8 +865,7 @@ local function Command(rest)
         local p = C_Map.GetPlayerMapPosition(MAZE_MAP, "player")
         if not p or not InLabyrinth() then Print("stand at the locked door inside the Labyrinth, then try again.") return end
         run.door, run.lockedSeen, run.doorOpened = { x = p.x * 100, y = p.y * 100 }, true, nil
-        local room = NearestHidden(p.x, p.y)
-        if room then run.rooms = run.rooms or {}; run.rooms[room.name] = "locked" end
+        MarkLocked(NearestHidden(p.x, p.y), "door marked by hand")
         TW.Log("MAZE", "locked door marked by hand at %.1f, %.1f", p.x * 100, p.y * 100)
         Print(("locked door marked at %.1f, %.1f - key icon on the map until it's opened."):format(p.x * 100, p.y * 100))
         ns.Refresh()

@@ -5,7 +5,7 @@ local TW = ns.TW
 -- (curiosity seen/vanished, party sync, blocked actions, our own Lua errors)
 -- so a strange moment can be looked at afterwards. /tw log shows it in a
 -- copyable box; it's saved per character in TippWorksCoreDB.
-local MAX = 500
+local MAX = 2000 -- a full Labyrinth run logs well over 500 lines
 local buffer = {} -- lines logged before SavedVariables load
 
 local function Store()
