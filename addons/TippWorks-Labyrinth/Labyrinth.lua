@@ -11,25 +11,27 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.1"
+ns.VERSION = "1.0.2"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
 
 -- Every three chambers is a reward checkpoint; nine per run.
 local CHAMBERS = {
-    { name = "Chamber of Rites", where = "start", special = true },
+    { name = "Chamber of Rites", where = "start", special = true, spot = { 50.3, 82.6 } },
     { name = "The Reliquary", where = "southwest" },
     { name = "The Catacombs", where = "southeast" },
     { name = "Halazzi's Lair", where = "west" },
     { name = "The Central Chamber", where = "middle" },
-    { name = "The Cave Towers", where = "east", special = true },
-    { name = "Jan'alai's Refuge", where = "northwest", special = true },
-    { name = "Nalorakk's Rest", where = "northeast", special = true },
-    { name = "Akil'zon's Roost", where = "north - Speaker's Chamber", special = true },
+    { name = "The Cave Towers", where = "east", special = true, spot = { 88.5, 51.5 } },
+    { name = "Jan'alai's Refuge", where = "northwest", special = true, spot = { 18.8, 18.2 } },
+    { name = "Nalorakk's Rest", where = "northeast", special = true, spot = { 58.5, 21.7 } },
+    { name = "Akil'zon's Roost", where = "north - Speaker's Chamber", special = true, spot = { 56.8, 17.8 } },
 }
 -- special = one of the five spots that can hold a Hexmask or the locked room
--- (from Journey rank 2: three masks, one locked room, one empty).
+-- (from Journey rank 2: three masks, one locked room, one empty). spot = where
+-- on the Labyrinth map (uiMapID 2647), from Wowhead/Seramate (Oct 15 2026).
+local MAZE_MAP = 2647
 
 local MASKS = {
     { key = "frozen", name = "Frozen Hexmask", what = "Frost Nova" },
@@ -238,6 +240,22 @@ local function QuestPicked(questID)
     ns.Refresh()
 end
 
+-- Arrow to a chamber's mask/locked-room spot. Map waypoints don't work inside
+-- delves, so it borrows TippWorks-Curios' guide arrow (or TomTom's).
+function ns.GuideToSpot(c)
+    if not c.spot then Print(c.name .. " isn't one of the mask/locked-room spots. Right-click marks it done.") return end
+    local x, y = c.spot[1] / 100, c.spot[2] / 100
+    local label = c.name .. " - mask/locked-room spot"
+    if TW.GuideArrow then
+        TW.GuideArrow(MAZE_MAP, x, y, label)
+    elseif TomTom and TomTom.AddWaypoint then
+        pcall(TomTom.AddWaypoint, TomTom, MAZE_MAP, x, y, { title = label, crazy = true })
+        Print("TomTom arrow set: " .. label)
+    else
+        Print(("%s: %.1f, %.1f (enable TippWorks-Curios or TomTom for an arrow)"):format(label, c.spot[1], c.spot[2]))
+    end
+end
+
 local function QuestText(questID)
     local lines = {}
     local objs = Safe(C_QuestLog.GetQuestObjectives, questID)
@@ -287,8 +305,10 @@ local function Row(i)
     b:SetScript("OnClick", function(self, btn)
         local e = self.entry
         if not e then return end
-        if e.chamber then
-            -- Manual fix-up: cycle not done -> done -> not done.
+        if e.chamber and btn ~= "RightButton" then
+            ns.GuideToSpot(e.chamber)
+        elseif e.chamber then
+            -- Manual fix-up: not done -> done -> not done.
             run.chambers[e.chamber.name] = run.chambers[e.chamber.name] ~= "done" and "done" or nil
             TW.Log("MAZE", "%s marked %s by hand", e.chamber.name, run.chambers[e.chamber.name] or "not done")
             ns.Refresh()
@@ -339,7 +359,8 @@ function ns.Refresh()
             tip = function()
                 local t = { c.name, "Where: " .. c.where }
                 if c.special then t[#t + 1] = "* Can hold a Hexmask or the locked room." end
-                t[#t + 1] = "Click: mark done / not done"
+                if c.spot then t[#t + 1] = ("Mask/locked-room spot: %.1f, %.1f - left-click for the arrow"):format(c.spot[1], c.spot[2]) end
+                t[#t + 1] = "Right-click: mark done / not done"
                 return t
             end }
     end
@@ -402,6 +423,13 @@ local function Command(rest)
     local sub = (rest:match("^(%S*)") or ""):lower()
     if sub == "" or sub == "show" or sub == "toggle" then Toggle()
     elseif sub == "reset" then NewRun("reset by hand"); ns.Refresh(); Print("run cleared.")
+    elseif sub == "spots" then
+        for _, c in ipairs(CHAMBERS) do
+            if c.spot then
+                Print(("  %s: %.1f, %.1f%s"):format(c.name, c.spot[1], c.spot[2],
+                    run and run.spots[c.name] and (" - " .. run.spots[c.name]) or ""))
+            end
+        end
     elseif sub == "where" then
         local c = CurrentChamber()
         Print(("sub-zone '%s', map '%s' -> chamber: %s"):format(tostring(Safe(GetSubZoneText)),
@@ -416,6 +444,7 @@ module = TW.Register({
     help = {
         { "", "show/hide the Labyrinth window (opens by itself inside)" },
         { "where", "which chamber the addon thinks you're in" },
+        { "spots", "the five mask/locked-room spots with coordinates" },
         { "reset", "start a fresh run list" },
     },
 })

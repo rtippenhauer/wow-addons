@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.8"
+ns.VERSION = "1.0.9"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -1205,6 +1205,12 @@ function ns.InitCurios()
         tick = tick + 1
         if tick % 4 == 0 and frame:IsShown() then ns.RefreshCurios() end -- distances
     end)
+end
+
+-- Other TippWorks addons (Labyrinth) borrow the guide arrow: map waypoints
+-- don't work inside delves. map = uiMapID, x/y = 0..1.
+function TW.GuideArrow(map, x, y, name)
+    GuideTo({ key = "guide", kind = "Guide", name = name, map = map, x = x, y = y, looted = {} })
 end
 
 function ns.ToggleCurios()
