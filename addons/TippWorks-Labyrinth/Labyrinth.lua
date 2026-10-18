@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.5.1"
+ns.VERSION = "1.5.2"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -86,6 +86,7 @@ local ROOM_ENTER_RANGE = 0.015 -- standing this close to a sealed room's spot = 
 local KEY_NAME = "Archaic Amani Key"
 local ICON_KEY = "Interface\\Icons\\INV_Misc_Key_03"
 local ICON_LOCK = "Interface\\LFGFrame\\UI-LFG-ICON-LOCK"
+local ICON_MASK = "Interface\\Icons\\INV_Mask_01" -- unchecked hidden room: possible Hexmask
 local WIDTH, ROW_H = 330, 17
 
 local db, run, win
@@ -563,8 +564,9 @@ function ns.DrawPins()
     for _, c in ipairs(HIDDEN) do
         local state = run and run.rooms and run.rooms[c.name]
         if not state then
-            Pin(c.spot[1], c.spot[2], c.name .. " - hidden room",
-                "A Hexmask, the locked room, or nothing. Right-click it in the Labyrinth window if it's empty.", nil, ICON_LOCK)
+            Pin(c.spot[1], c.spot[2], c.name .. " - possible Hexmask",
+                "One of the five spots: 3 hold a Hexmask, 1 is the locked room, 1 is empty. Right-click it in the Labyrinth window if it's empty.",
+                nil, ICON_MASK)
         elseif state == "locked" and not run.doorOpened and not run.door then
             Pin(c.spot[1], c.spot[2], c.name .. " - locked room",
                 run.hasKey and "You have the Archaic Amani Key - open it." or "Needs the Archaic Amani Key from the Keeper of the Key.",
@@ -757,7 +759,7 @@ local function RunList()
     list[#list + 1] = Header(("Hidden rooms  %d/5 checked"):format(resolved))
     for _, c in ipairs(HIDDEN) do
         local state = run.rooms and run.rooms[c.name]
-        local text = not state and "|cff888888?  padlock|r"
+        local text = not state and "|cff888888possible mask|r"
             or state == "locked" and (run.doorOpened and "|cff33ff33locked room - opened|r" or "|cffffd100locked room - key|r")
             or state == "empty" and "|cff888888empty|r"
             or ("|cff33ff33" .. state .. "|r")
