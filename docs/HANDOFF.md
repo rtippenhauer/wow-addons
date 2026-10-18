@@ -102,6 +102,17 @@ SavedVariables: `CoiledRareTrackerDB` (per character), `CoiledRareTrackerAccount
   from addons in delves. First readable sign = his CHAT_MSG_MONSTER_SAY lines when you're near. Only a
   key press (/targetexact Dundun, Deep Delve's Find & Mark) can target him earlier.
 
+## Labyrinth Keeper of the Key - learned Oct 18 2026 (TippWorks-Labyrinth 1.5.5)
+- **Keeper of the Key** (NPC 273788): hostile, level 90, ~7.1M HP. Never a vignette; hidden from addons like
+  Dundun. Found with a macro (`/tar Keeper of the Key`, skull, `/ping [@target]`) - the Keeper button does that.
+  He hides in a **chamber, often a lower floor of one already cleared** (Oct 18: Jan'alai's Refuge, ~22, 35, under
+  the Halazzi's Lair ledge, door from the lower central area). Kill him, loot the Archaic Amani Key from him.
+- The loot line for a party member is "Name-Realm receives item: ...[Archaic Amani Key]" - not yours.
+- Escape (and closing the map with Escape) closes every frame in UISpecialFrames: the Labyrinth window opts out
+  (`keepOnEscape`).
+- Pinging too often gives "You can't do that right now".
+- Curios party sync sends hundreds of found/looted messages in the Labyrinth; those are counted, not logged.
+
 ## Release routine (keep doing this)
 1. Change code. Syntax-check every .lua (e.g. `npx luaparse` / a Lua 5.1 parser).
 2. **Bump the version in BOTH** `Data.lua` (`ns.VERSION`) and the `.toc` (`## Version`).

@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.9"
+ns.VERSION = "1.0.10"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -108,6 +108,25 @@ local queued = {}
 local stalled = nil
 local RESULT = { [3] = "throttled by WoW", [5] = "not in a group", [9] = "general error" }
 
+-- Found/looted messages come by the hundred in the Labyrinth and pushed the
+-- whole run out of the log: those are counted and summed up every 30 seconds.
+local syncSent, syncGot = 0, 0
+local function LogSync(dir, who, msg)
+    local tag = msg:sub(1, 1)
+    if tag == "F" or tag == "L" then
+        if dir == "sent" then syncSent = syncSent + 1 else syncGot = syncGot + 1 end
+    elseif dir == "sent" then
+        ns.Log("SYNC", "sent to %s: %s", who, msg)
+    else
+        ns.Log("SYNC", "from %s: %s", who, msg)
+    end
+end
+C_Timer.NewTicker(30, function()
+    if syncSent + syncGot == 0 then return end
+    ns.Log("SYNC", "curiosity updates: %d sent, %d received", syncSent, syncGot)
+    syncSent, syncGot = 0, 0
+end)
+
 local function SendOne()
     local msg = outbox[1]
     if not msg then return end
@@ -123,7 +142,7 @@ local function SendOne()
         return
     end
     if stalled then ns.Log("SYNC", "sending resumed"); stalled = nil end
-    ns.Log("SYNC", "sent to %s: %s", ch, msg)
+    LogSync("sent", ch, msg)
     table.remove(outbox, 1)
     queued[msg] = nil
 end
@@ -1086,7 +1105,7 @@ local function OnAddonMessage(prefix, msg, _, sender)
     if prefix ~= PREFIX then return end
     local who = Ambiguate(sender, "short")
     if who == me then return end
-    ns.Log("SYNC", "from %s: %s", who, msg)
+    LogSync("from", who, msg)
     local tag, key, kind, x, y, map, name = strsplit("|", msg, 7)
     -- Versions are swapped whether or not a delve run is being tracked:
     -- hello ("H") and its reply ("R") carry the sender's version (older

@@ -12,8 +12,14 @@ For the Labyrinth of Kindo'jan, the 12.1.5 mega-delve. The window opens by itsel
   run earns *Happy Hexmask Collector*. The five chambers marked * are the spots that can hold a mask
   or the locked room (from Journey rank 2): Chamber of Rites, The Cave Towers, Akil'zon's Roost,
   Jan'alai's Refuge and Nalorakk's Rest.
-- **Locked room:** the **Keeper of the Key** showing up on the map, and whether you have the **Archaic Amani
-  Key**. The key counts whether it arrives as a loot line, a bag item or a buff. Once the locked door is
+- **Find the Keeper:** the game hides the **Keeper of the Key** from addons, so, like Dundun, he's found with a
+  macro. Bind **Find the Keeper of the Key** (Options > Keybindings > AddOns > Tippenhauer Works - Labyrinth),
+  or make a macro with `/click TippWorksLabyrinthKeeperButton`. Press it in each chamber before moving on: it
+  targets him, puts a skull on him and pings him. Turn on nameplates (Ctrl+V) to see him through walls; he's often
+  on a lower floor of a chamber you've already cleared. Kill him and loot the key from him. Where he was found is
+  remembered (warband-wide) and shown in the "Door" row's tooltip.
+- **Locked room:** whether you have the **Archaic Amani Key**, or which party member does. The key counts whether
+  it arrives as a loot line, a bag item or a buff. Once the locked door is
   found, it's marked with a **key icon** on the Labyrinth map, until the key is used (it leaves your bags or
   the buff ends) or you mark it opened. The "Door" row: left-click for the arrow, right-click to mark it
   opened. `/tw maze door` marks the door where you're standing if the addon missed it.
@@ -38,6 +44,7 @@ For the Labyrinth of Kindo'jan, the 12.1.5 mega-delve. The window opens by itsel
 | `/tw maze spots` | The five mask/locked-room spots with coordinates |
 | `/tw maze chests` | Open the Chests tab |
 | `/tw maze door` | Mark the locked door where you're standing (key icon on the map) |
+| `/tw maze keeper` | How to find the Keeper of the Key, and where he was found before |
 | `/tw maze pins` | Show or hide the chest pins on the Labyrinth map |
 | `/tw maze reset` | Start a fresh run list |
 

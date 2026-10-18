@@ -6,6 +6,7 @@ local TW = ns.TW
 --   local win = TW.CreateWindow({
 --       name = "TippWorksVaultFrame", title = "Weekly Checklist (90)", version = "1.0.0",
 --       width = 350, db = db,                       -- db.pos is saved here
+--       keepOnEscape = true,                        -- optional: Escape doesn't close it
 --       tabs = { { key = "weekly", label = "Weekly", title = "Weekly Checklist (90)" }, ... },
 --       onTab = function(key) end,                  -- after a tab is selected
 --   })
@@ -32,8 +33,9 @@ function TW.CreateWindow(o)
     end)
     local pos = o.db.pos
     if pos then f:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4]) else f:SetPoint("RIGHT", UIParent, "RIGHT", -60, 0) end
-    -- Escape closes it like Blizzard's own panels.
-    if o.name then tinsert(UISpecialFrames, o.name) end
+    -- Escape closes it like Blizzard's own panels - unless it's meant to stay up
+    -- through a run (closing the map with Escape closes these too).
+    if o.name and not o.keepOnEscape then tinsert(UISpecialFrames, o.name) end
 
     f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     f.title:SetPoint("TOPLEFT", 12, -10)

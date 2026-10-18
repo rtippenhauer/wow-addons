@@ -10,7 +10,7 @@ ns.TW = TW
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-TW.VERSION = "1.2.1"
+TW.VERSION = "1.2.2"
 TW.COLOR = "e6a23c"
 TW.WEBSITE = "https://github.com/rtippenhauer/wow-addons"
 

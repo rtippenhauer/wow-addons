@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.5.4"
+ns.VERSION = "1.5.5"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -156,6 +156,10 @@ local function MarkChamber(c, state, how)
     if state == "done" then
         local n = DoneCount()
         if n == 3 or n == 6 or n == 9 then Print(("%d chambers done - reward checkpoint!"):format(n)) end
+        -- Like Dundun: the Keeper hides in a chamber, so look before moving on.
+        if not run.hasKey and not run.keyHolder and not run.doorOpened then
+            Print("before you move on: press |cffffd100Find the Keeper|r (key binding) - he may be hiding in this chamber.")
+        end
     end
     ns.Refresh()
 end
@@ -681,7 +685,7 @@ end
 
 local function CreateWindow()
     win = TW.CreateWindow({ name = "TippWorksLabyrinthFrame", title = "Labyrinth of Kindo'jan", version = ns.VERSION,
-        width = WIDTH, db = db, onTab = function() ns.Refresh() end, tabs = {
+        width = WIDTH, db = db, keepOnEscape = true, onTab = function() ns.Refresh() end, tabs = {
             { key = "run", label = "This run", title = "Labyrinth of Kindo'jan" },
             { key = "chests", label = "Chests", title = "Labyrinth Chests" },
         } })
@@ -794,12 +798,19 @@ local function RunList()
     list[#list + 1] = { door = true,
         left = "  Door" .. (run.door and ((" %.1f, %.1f"):format(run.door.x, run.door.y)) or " - not found yet"),
         right = run.doorOpened and "|cff33ff33opened|r" or run.hasKey and "|cffffd100you have the key|r"
-            or "|cff888888no key yet|r",
+            or run.keyHolder and ("|cffffd100" .. run.keyHolder .. " has the key|r") or "|cff888888no key yet|r",
         tip = function()
-            return { "Locked room", "The key (Archaic Amani Key) drops from the Keeper of the Key, anywhere in the Labyrinth.",
-                "The door shows as a key icon on the map until it's opened.",
+            local t = { "Locked room", "Kill the Keeper of the Key and loot the Archaic Amani Key from him.",
+                "He hides in one of the chambers, often on a lower floor - in each chamber press Find the Keeper "
+                    .. "(Options > Keybindings > AddOns) before moving on. The nameplate (Ctrl+V) shows him through walls.",
+                "The door shows as a key icon on the map until it's opened." }
+            for _, k in ipairs(warband.keeper or {}) do
+                t[#t + 1] = ("Found before: %s (%.1f, %.1f)"):format(k.chamber or "?", k.x or 0, k.y or 0)
+            end
+            for _, l in ipairs({
                 "Left-click: arrow to the door  |  Right-click: mark opened / not opened",
-                "/tw maze door: mark the door where you're standing" }
+                "/tw maze door: mark the door where you're standing" }) do t[#t + 1] = l end
+            return t
         end }
     local qn = 0
     for id, title in pairs(AllQuests()) do
@@ -869,6 +880,12 @@ local function Command(rest)
         TW.Log("MAZE", "locked door marked by hand at %.1f, %.1f", p.x * 100, p.y * 100)
         Print(("locked door marked at %.1f, %.1f - key icon on the map until it's opened."):format(p.x * 100, p.y * 100))
         ns.Refresh()
+    elseif sub == "keeper" then
+        Print("Find the Keeper: Options > Keybindings > AddOns > Tippenhauer Works - Labyrinth,")
+        Print("or a macro with: /click TippWorksLabyrinthKeeperButton  - press it in each chamber before moving on.")
+        for _, k in ipairs(warband.keeper or {}) do
+            Print(("  found before: %s (%.1f, %.1f)"):format(k.chamber or "?", k.x or 0, k.y or 0))
+        end
     elseif sub == "chests" then
         if win then win:SelectTab("chests"); win:Show() end
     elseif sub == "masks" then
@@ -900,6 +917,7 @@ module = TW.Register({
         { "spots", "the five mask/locked-room spots with coordinates" },
         { "chests", "open the Chests tab (Sturdy Chests, sealed rooms)" },
         { "door", "mark the locked door where you're standing (key icon on the map)" },
+        { "keeper", "how to find the Keeper of the Key (key binding / macro)" },
         { "pins", "show/hide the chest pins on the Labyrinth map" },
         { "masks", "show/hide the mask icons on the hidden rooms (hidden while HandyNotes_Midnight is loaded)" },
         { "padlocks", "show/hide padlocks on the Loa-sealed rooms (off by default)" },
@@ -916,6 +934,48 @@ function TippWorksLabyrinth_OnAddonCompartmentEnter(_, menuButton)
     GameTooltip:Show()
 end
 function TippWorksLabyrinth_OnAddonCompartmentLeave() GameTooltip:Hide() end
+
+---------------------------------------------------------------------------
+-- Find the Keeper: the game hides his name from addons in delves, so like
+-- Dundun he's found with a macro - target him, skull him, ping him. A hidden
+-- secure button run by a key binding (Bindings.xml) or /click.
+---------------------------------------------------------------------------
+local KEEPER_MACRO = "/cleartarget\n/tar Keeper of the Key\n/stopmacro [noexists]\n"
+    .. "/tm [@target,exists,nodead] 0\n/tm [@target,exists,nodead] 8\n/ping [@target] Assist"
+
+local function KeeperFound()
+    if not UnitExists("target") or UnitIsDead("target") then
+        Print("no Keeper of the Key in range here.")
+        return
+    end
+    local p = C_Map.GetPlayerMapPosition(MAZE_MAP, "player")
+    local c = CurrentChamber()
+    local name = c and c.name or tostring(Safe(GetSubZoneText) or "?")
+    TW.Log("MAZE", "Keeper of the Key targeted from %s (%.1f, %.1f)", name, p and p.x * 100 or 0, p and p.y * 100 or 0)
+    Print(("|cffffd100Keeper of the Key|r found near %s - skull and ping on him. Turn on nameplates (Ctrl+V) to see him through walls."):format(name))
+    if run and not run.keeperFound then
+        run.keeperFound = true
+        warband.keeper = warband.keeper or {}
+        table.insert(warband.keeper, 1, { chamber = name, x = p and p.x * 100, y = p and p.y * 100, at = time() })
+        while #warband.keeper > 5 do table.remove(warband.keeper) end
+        ns.Refresh()
+    end
+end
+
+local function InitKeeperButton()
+    local b = CreateFrame("Button", "TippWorksLabyrinthKeeperButton", UIParent, "SecureActionButtonTemplate")
+    b:RegisterForClicks("AnyUp", "AnyDown")
+    b:SetAttribute("type", "macro")
+    b:SetAttribute("macrotext", KEEPER_MACRO)
+    b:SetScript("PostClick", function(_, _, down)
+        if (down and true or false) ~= GetCVarBool("ActionButtonUseKeyDown") then return end
+        TW.Guard("maze keeper", KeeperFound)
+    end)
+    b:Hide()
+end
+
+BINDING_HEADER_TIPPWORKSLABYRINTH = "Tippenhauer Works - Labyrinth"
+_G["BINDING_NAME_CLICK TippWorksLabyrinthKeeperButton:LeftButton"] = "Find the Keeper of the Key (target + skull + ping)"
 
 local inside = false
 local ev = CreateFrame("Frame")
@@ -940,6 +1000,20 @@ ev:SetScript("OnEvent", function(self, event, ...)
         db.rooms = db.rooms or {}
         run = db.run
         if not run then NewRun("first load") end
+        -- Before 1.5.4 door-message markers could mark several locked rooms (and a
+        -- key icon in the wrong place): a run with more than one is cleaned up.
+        local lockedRooms = 0
+        for _, st in pairs(run.rooms or {}) do if st == "locked" then lockedRooms = lockedRooms + 1 end end
+        if lockedRooms > 1 then
+            for name, st in pairs(run.rooms) do if st == "locked" then run.rooms[name] = nil end end
+            run.door, run.lockedSeen = nil, nil
+            TW.Log("MAZE", "cleared %d wrongly locked rooms and the door marker from an older version", lockedRooms)
+        end
+        -- First sighting (Oct 18, Rob and Terry): the Keeper was in Jan'alai's Refuge.
+        if not warband.keeper then
+            warband.keeper = { { chamber = "Jan'alai's Refuge", x = 22.2, y = 35.3, at = 1792363532 } }
+        end
+        InitKeeperButton()
         TW.Log("INFO", "TippWorks-Labyrinth v%s loaded", ns.VERSION)
         CreateWindow()
         for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA",
@@ -993,9 +1067,20 @@ ev:SetScript("OnEvent", function(self, event, ...)
         if Readable(msg) then
             local m = MaskByName(msg)
             if m then MaskFound(m, "loot message") end
-            if msg:find("Amani Key", 1, true) and not run.hasKey then
-                run.hasKey = true
-                Print("you have the |cffffd100key|r" .. (run.door and " - head for the locked door." or " - now find the locked door."))
+            if msg:find("Amani Key", 1, true) then
+                -- "You receive ..." is yours; "Ndeath-Garona receives ..." is a party member's.
+                local who = msg:match("^([^%s]+) receives? ")
+                if who == "You" then who = nil end
+                if who then
+                    who = Ambiguate(who, "short")
+                    if run.keyHolder ~= who then
+                        run.keyHolder = who
+                        Print(("|cffffd100%s|r has the key - they open the locked door."):format(who))
+                    end
+                elseif not run.hasKey then
+                    run.hasKey = true
+                    Print("you have the |cffffd100key|r" .. (run.door and " - head for the locked door." or " - now find the locked door."))
+                end
                 TW.Log("MAZE", "key looted: %s", msg)
                 ns.Refresh()
             end
