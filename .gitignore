@@ -10,3 +10,6 @@ Thumbs.db
 desktop.ini
 .DS_Store
 .vscode/
+
+# Browser tool scratch files
+.playwright-mcp/
