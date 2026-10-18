@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.1.0"
+ns.VERSION = "1.2.0"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -62,6 +62,25 @@ local SEALED = {
     { "Nalorakk", 7, "The Reliquary", 28.8, 77.1 }, { "Nalorakk", 7, "Nalorakk's Rest", 64.1, 39.2 },
     { "Halazzi", 9, "Halazzi's Lair", 13.5, 46.1 }, { "Halazzi", 9, "The Catacombs", 66.6, 54.9 },
 }
+-- What each seal's chests give, and the items tied to a specific sealed room.
+local SEAL_REWARDS = {
+    ["Akil'zon"] = "Akil'zon's Swiftness (+3% speed per chamber cleared, every run) and the Falco Strikes glove enchant",
+    ["Jan'alai"] = "the Heat Wave glove enchant (no permanent upgrade)",
+    ["Nalorakk"] = "Nalorakk's Ferocity (+3% primary stat per chamber cleared, every run) and the Ursine's Ironhide glove enchant",
+    ["Halazzi"] = "Halazzi's Shroud (cheat death once per run) and the Eye of the Lynx glove enchant",
+}
+local ROOM_REWARDS = {
+    ["Akil'zon@Chamber of Rites"] = "Loa-Touched Spine, Hexdrinker's Shoulders (transmog)",
+    ["Akil'zon@Akil'zon's Roost"] = "Feathers of Akil'zon (toy)",
+    ["Jan'alai@Jan'alai's Refuge"] = "Loa-Touched Deltoid (transmog)",
+    ["Jan'alai@Halazzi's Lair"] = "Rite of Jan'alai's Flame (toy)",
+    ["Nalorakk@The Reliquary"] = "Nalorakk's Strength Charm (toy)",
+    ["Halazzi@Halazzi's Lair"] = "Loa-Touched Visage (transmog)",
+    ["Halazzi@The Catacombs"] = "Trail of Halazzi (toy)",
+}
+-- Somewhere among the 44 Sturdy Chests (Wowhead doesn't say which):
+local CHEST_UNIQUES = "Amani Effigy, Hexbearer's Pauldrons, Effigy of Corrosion, Ancient Amani Mural, Brown Amani Tapestry"
+
 local CHEST_LOOT_RANGE = 0.02 -- map fraction (~2%): loot opened this close to a chest's spot = that chest
 local WIDTH, ROW_H = 330, 17
 
@@ -342,7 +361,21 @@ local function OnLoot()
     end
     TW.Log("MAZE", "loot opened at %.1f, %.1f - nearest Sturdy Chest %d (%s) %.1f%% away", p.x * 100, p.y * 100,
         best[1], best[2], bestD * 100)
-    if bestD <= CHEST_LOOT_RANGE then ChestLooted(best, "loot opened beside it") end
+    if bestD <= CHEST_LOOT_RANGE then
+        -- What this chest gave: the loot window's items, kept for its tooltip.
+        local got = {}
+        for slot = 1, (Safe(GetNumLootItems) or 0) do
+            local ok, _, name, qty = pcall(GetLootSlotInfo, slot)
+            if ok and Readable(name) and type(name) == "string" and name ~= "" then
+                got[#got + 1] = (Readable(qty) and qty and qty > 1) and (name .. " x" .. qty) or name
+            end
+        end
+        if #got > 0 then
+            db.chestLoot[best[1]] = got
+            TW.Log("MAZE", "Sturdy Chest %d (%s) gave: %s", best[1], best[2], table.concat(got, ", "))
+        end
+        ChestLooted(best, "loot opened beside it")
+    end
 end
 
 -- Arrow to a spot on the Labyrinth map. Map waypoints don't work inside
@@ -481,17 +514,32 @@ local function ChestList()
         list[#list + 1] = { chest = ch,
             left = ("  %d. %s"):format(ch[1], ch[2]),
             right = db.chests[ch[1]] and "|cff33ff33looted|r" or ("|cffffd100%.1f, %.1f|r"):format(ch[3], ch[4]),
-            tip = function() return { ("Sturdy Chest %d"):format(ch[1]), ("%s  %.1f, %.1f"):format(ch[2], ch[3], ch[4]),
-                "Left-click: guide arrow  |  Right-click: mark looted / not looted" } end }
+            tip = function()
+                local t = { ("Sturdy Chest %d"):format(ch[1]), ("%s  %.1f, %.1f"):format(ch[2], ch[3], ch[4]) }
+                local got = db.chestLoot[ch[1]]
+                if got then
+                    t[#t + 1] = "You got: " .. table.concat(got, ", ")
+                else
+                    t[#t + 1] = "Reputation, Journey progress, Voidlight Marl, Corrosive Coins, Undercoin - and maybe one of: " .. CHEST_UNIQUES
+                end
+                t[#t + 1] = "Left-click: guide arrow  |  Right-click: mark looted / not looted"
+                return t
+            end }
     end
     list[#list + 1] = Header("Loa-sealed rooms  |cff888888(2-3 more chests each)|r")
     for _, r in ipairs(SEALED) do
         list[#list + 1] = { sealed = r,
             left = ("  %s seal - %s"):format(r[1], r[3]),
             right = ("|cff888888Journey %d|r"):format(r[2]),
-            tip = function() return { r[1] .. " sealed room", ("%s  %.1f, %.1f"):format(r[3], r[4], r[5]),
-                ("Opens at Labyrinth Journey rank %d. Its Sturdy Chests give a permanent Labyrinth upgrade and a glove enchant."):format(r[2]),
-                "Left-click: guide arrow" } end }
+            tip = function()
+                local t = { r[1] .. " sealed room", ("%s  %.1f, %.1f"):format(r[3], r[4], r[5]),
+                    ("Opens at Labyrinth Journey rank %d."):format(r[2]),
+                    "Seal reward: " .. SEAL_REWARDS[r[1]] }
+                local special = ROOM_REWARDS[r[1] .. "@" .. r[3]]
+                if special then t[#t + 1] = "In this room: " .. special end
+                t[#t + 1] = "Left-click: guide arrow"
+                return t
+            end }
     end
     return list, "|cff888888Flooded Chamber: swim under the two waterfalls on the east side of the Central Chamber, "
         .. "melt the ice wall with any Fire damage (the Fiery Hexmask works) - 5 more Sturdy Chests.|r"
@@ -514,6 +562,9 @@ local function RunList()
             tip = function()
                 local t = { c.name, "Where: " .. c.where }
                 if c.special then t[#t + 1] = "* Can hold a Hexmask or the locked room." end
+                if c.name == "The Cave Towers" then
+                    t[#t + 1] = "Bonus objective: find 5 Loa Statuettes hidden here for the Ruined Amani Ritual Urn (decor)."
+                end
                 if c.spot then t[#t + 1] = ("Mask/locked-room spot: %.1f, %.1f - left-click for the arrow"):format(c.spot[1], c.spot[2]) end
                 t[#t + 1] = "Right-click: mark done / not done"
                 return t
@@ -640,6 +691,7 @@ ev:SetScript("OnEvent", function(self, event, ...)
         TippWorksLabyrinthDB = TippWorksLabyrinthDB or {}
         db = TippWorksLabyrinthDB
         db.chests = db.chests or {}
+        db.chestLoot = db.chestLoot or {}
         run = db.run
         if not run then NewRun("first load") end
         TW.Log("INFO", "TippWorks-Labyrinth v%s loaded", ns.VERSION)
