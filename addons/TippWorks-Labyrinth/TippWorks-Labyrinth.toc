@@ -2,7 +2,7 @@
 ## Title: |cffe6a23cTippenhauer Works|r - Labyrinth
 ## Notes: Labyrinth of Kindo'jan: chambers done this run, the three Hexmasks, the locked room and help with quests picked up inside.
 ## Author: rtippenhauer (Tippenhauer Works)
-## Version: 1.0.2
+## Version: 1.1.0
 ## X-Website: https://github.com/rtippenhauer/wow-addons
 ## Category: Tippenhauer Works
 ## Group: TippWorks-Core

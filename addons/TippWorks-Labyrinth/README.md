@@ -14,6 +14,13 @@ For the Labyrinth of Kindo'jan, the 12.1.5 mega-delve. The window opens by itsel
   Jan'alai's Refuge and Nalorakk's Rest.
 - **Locked room:** says when the **Keeper of the Key** shows up on the map (it drops the Archaic Amani
   Key) and when you have the key.
+- **Chests tab:** the **20 Sturdy Chests** that need nothing to reach, by chamber with coordinates. Sturdy
+  Chests loot **once per character**, so these stay ticked across runs. When you open loot right beside one
+  (within about 2% of the map), it's ticked automatically. Left-click a chest for the guide arrow;
+  right-click marks it looted or not. Unlooted ones also show as gold pins on the Labyrinth's world map.
+  The tab also lists the **9 Loa-sealed rooms** (2-3 more chests each, opened at Labyrinth Journey ranks
+  3/5/7/9) and how to reach the **Flooded Chamber**: swim under the two waterfalls on the east side of the
+  Central Chamber, then melt the ice wall with any Fire damage. The Run tab shows "chests got/total" per chamber.
 - **Quests from the Labyrinth:** every quest your quest log files under the *The Labyrinth of
   Kindo'jan* heading, e.g. the one from a mask, plus anything picked up inside. It doesn't matter
   when you picked it up or where you are now; `/tw maze` shows them anywhere. Click one to track it,
@@ -24,13 +31,15 @@ For the Labyrinth of Kindo'jan, the 12.1.5 mega-delve. The window opens by itsel
 | `/tw maze` | Show or hide the window (`/tw labyrinth` and `/tw lab` work too) |
 | `/tw maze where` | Which chamber the addon thinks you're in |
 | `/tw maze spots` | The five mask/locked-room spots with coordinates |
+| `/tw maze chests` | Open the Chests tab |
+| `/tw maze pins` | Show or hide the chest pins on the Labyrinth map |
 | `/tw maze reset` | Start a fresh run list |
 
 This first version also writes what the game reports into `/tw log`: chamber names, objectives, buffs,
 map markers and quests. That's so the chamber, mask and room detection can be checked against a real
 run and tightened up.
 
-Spot coordinates are from Wowhead / Seramate (Oct 15 2026): Chamber of Rites 50.3, 82.6; The Cave Towers
+Chest, sealed-room and spot coordinates are from Wowhead's Labyrinth guide (updated Oct 16 2026): Chamber of Rites 50.3, 82.6; The Cave Towers
 88.5, 51.5; Akil'zon's Roost 56.8, 17.8; Jan'alai's Refuge 18.8, 18.2; Nalorakk's Rest 58.5, 21.7.
 
 Requires **TippWorks-Core**. The arrow needs **TippWorks-Curios** or TomTom.

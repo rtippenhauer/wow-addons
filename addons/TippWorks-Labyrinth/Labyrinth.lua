@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.2"
+ns.VERSION = "1.1.0"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -39,6 +39,30 @@ local MASKS = {
     { key = "thundering", name = "Thundering Hexmask", what = "Chain Lightning" },
 }
 local KEEPER_NPC = 273788
+
+-- The 20 Sturdy Chests with no requirements, the nine Loa-sealed rooms
+-- (Journey ranks 3/5/7/9) and the Flooded Chamber - Wowhead's Labyrinth
+-- guide (updated 2026/10/16), all on the Labyrinth map (uiMapID 2647).
+-- Sturdy Chests loot ONCE per character, so they're tracked across runs.
+local CHESTS = {
+    { 1, "Chamber of Rites", 37.1, 69.8 }, { 2, "Chamber of Rites", 47.0, 64.3 },
+    { 3, "The Reliquary", 30.0, 74.1 }, { 4, "The Reliquary", 22.0, 68.6 },
+    { 5, "Halazzi's Lair", 13.8, 35.5 }, { 6, "Halazzi's Lair", 26.2, 40.3 },
+    { 7, "The Catacombs", 72.3, 65.6 }, { 8, "The Catacombs", 69.6, 70.9 },
+    { 9, "The Cave Towers", 87.0, 63.0 }, { 10, "The Cave Towers", 81.5, 55.4 },
+    { 11, "Akil'zon's Roost", 40.6, 20.7 }, { 12, "Akil'zon's Roost", 45.4, 11.7 },
+    { 13, "Nalorakk's Rest", 68.4, 33.8 }, { 14, "Nalorakk's Rest", 67.5, 27.7 },
+    { 15, "Jan'alai's Refuge", 22.4, 29.4 }, { 16, "Jan'alai's Refuge", 21.5, 36.4 }, { 17, "Jan'alai's Refuge", 28.5, 22.9 },
+    { 18, "The Central Chamber", 45.8, 48.0 }, { 19, "The Central Chamber", 40.7, 45.7 }, { 20, "The Central Chamber", 47.6, 40.3 },
+}
+local SEALED = {
+    { "Akil'zon", 3, "Chamber of Rites", 38.7, 78.1 }, { "Akil'zon", 3, "The Cave Towers", 88.7, 70.7 },
+    { "Akil'zon", 3, "Akil'zon's Roost", 34.9, 17.8 },
+    { "Jan'alai", 5, "Halazzi's Lair", 24.4, 35.6 }, { "Jan'alai", 5, "Jan'alai's Refuge", 23.4, 16.3 },
+    { "Nalorakk", 7, "The Reliquary", 28.8, 77.1 }, { "Nalorakk", 7, "Nalorakk's Rest", 64.1, 39.2 },
+    { "Halazzi", 9, "Halazzi's Lair", 13.5, 46.1 }, { "Halazzi", 9, "The Catacombs", 66.6, 54.9 },
+}
+local CHEST_LOOT_RANGE = 0.02 -- map fraction (~2%): loot opened this close to a chest's spot = that chest
 local WIDTH, ROW_H = 330, 17
 
 local db, run, win
@@ -244,16 +268,7 @@ end
 -- delves, so it borrows TippWorks-Curios' guide arrow (or TomTom's).
 function ns.GuideToSpot(c)
     if not c.spot then Print(c.name .. " isn't one of the mask/locked-room spots. Right-click marks it done.") return end
-    local x, y = c.spot[1] / 100, c.spot[2] / 100
-    local label = c.name .. " - mask/locked-room spot"
-    if TW.GuideArrow then
-        TW.GuideArrow(MAZE_MAP, x, y, label)
-    elseif TomTom and TomTom.AddWaypoint then
-        pcall(TomTom.AddWaypoint, TomTom, MAZE_MAP, x, y, { title = label, crazy = true })
-        Print("TomTom arrow set: " .. label)
-    else
-        Print(("%s: %.1f, %.1f (enable TippWorks-Curios or TomTom for an arrow)"):format(label, c.spot[1], c.spot[2]))
-    end
+    ns.GuideTo(c.name .. " - mask/locked-room spot", c.spot[1], c.spot[2])
 end
 
 local function QuestText(questID)
@@ -290,6 +305,103 @@ local function GuideQuest(questID)
 end
 
 ---------------------------------------------------------------------------
+-- Sturdy Chests (looted once per character: db.chests[n] = time looted)
+---------------------------------------------------------------------------
+local function ChestsIn(chamber)
+    local got, total = 0, 0
+    for _, ch in ipairs(CHESTS) do
+        if ch[2] == chamber then
+            total = total + 1
+            if db.chests[ch[1]] then got = got + 1 end
+        end
+    end
+    return got, total
+end
+
+local function ChestLooted(ch, how)
+    if db.chests[ch[1]] then return end
+    db.chests[ch[1]] = time()
+    TW.Log("MAZE", "Sturdy Chest %d (%s) looted (%s)", ch[1], ch[2], how)
+    Print(("Sturdy Chest %d (%s) looted."):format(ch[1], ch[2]))
+    ns.Refresh()
+end
+
+-- Loot opened close to a chest's spot: that chest. Every loot position is
+-- logged so the range can be checked against a real run.
+local function OnLoot()
+    local p = C_Map.GetPlayerMapPosition(MAZE_MAP, "player")
+    if not p then
+        Note("lootnopos", "loot opened, but no position on map %d (you're on map %s)", MAZE_MAP,
+            tostring(C_Map.GetBestMapForUnit("player")))
+        return
+    end
+    local best, bestD
+    for _, ch in ipairs(CHESTS) do
+        local d = math.sqrt((p.x - ch[3] / 100) ^ 2 + (p.y - ch[4] / 100) ^ 2)
+        if not bestD or d < bestD then best, bestD = ch, d end
+    end
+    TW.Log("MAZE", "loot opened at %.1f, %.1f - nearest Sturdy Chest %d (%s) %.1f%% away", p.x * 100, p.y * 100,
+        best[1], best[2], bestD * 100)
+    if bestD <= CHEST_LOOT_RANGE then ChestLooted(best, "loot opened beside it") end
+end
+
+-- Arrow to a spot on the Labyrinth map. Map waypoints don't work inside
+-- delves, so it borrows TippWorks-Curios' guide arrow (or TomTom's).
+function ns.GuideTo(label, x, y)
+    if TW.GuideArrow then
+        TW.GuideArrow(MAZE_MAP, x / 100, y / 100, label)
+    elseif TomTom and TomTom.AddWaypoint then
+        pcall(TomTom.AddWaypoint, TomTom, MAZE_MAP, x / 100, y / 100, { title = label, crazy = true })
+        Print("TomTom arrow set: " .. label)
+    else
+        Print(("%s: %.1f, %.1f (enable TippWorks-Curios or TomTom for an arrow)"):format(label, x, y))
+    end
+end
+
+-- Gold pins on the Labyrinth map for chests you haven't looted.
+local overlay, pins = nil, {}
+function ns.DrawPins()
+    if not WorldMapFrame or not WorldMapFrame:IsShown() then return end
+    local canvas = WorldMapFrame.ScrollContainer.Child
+    if not overlay then
+        overlay = CreateFrame("Frame", nil, canvas)
+        overlay:SetAllPoints(canvas)
+        overlay:SetFrameLevel(canvas:GetFrameLevel() + 2050)
+    end
+    for _, p in ipairs(pins) do p:Hide() end
+    if WorldMapFrame:GetMapID() ~= MAZE_MAP or db.hidePins then return end
+    local w, h = canvas:GetSize()
+    local size = math.max(12, (w or 0) / 55)
+    local n = 0
+    for _, ch in ipairs(CHESTS) do
+        if not db.chests[ch[1]] then
+            n = n + 1
+            local p = pins[n]
+            if not p then
+                p = CreateFrame("Frame", nil, overlay)
+                p.tex = p:CreateTexture(nil, "OVERLAY")
+                p.tex:SetAllPoints()
+                p.tex:SetAtlas("VignetteLoot")
+                p:EnableMouse(true)
+                p:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:AddLine(("Sturdy Chest %d"):format(self.ch[1]))
+                    GameTooltip:AddLine(("%s  %.1f, %.1f"):format(self.ch[2], self.ch[3], self.ch[4]), 1, 1, 1)
+                    GameTooltip:Show()
+                end)
+                p:SetScript("OnLeave", GameTooltip_Hide)
+                pins[n] = p
+            end
+            p.ch = ch
+            p:SetSize(size, size)
+            p:ClearAllPoints()
+            p:SetPoint("CENTER", overlay, "TOPLEFT", ch[3] / 100 * w, -ch[4] / 100 * h)
+            p:Show()
+        end
+    end
+end
+
+---------------------------------------------------------------------------
 -- Window
 ---------------------------------------------------------------------------
 local function Row(i)
@@ -317,6 +429,13 @@ local function Row(i)
             ns.Refresh()
         elseif e.quest then
             GuideQuest(e.quest)
+        elseif e.chest and btn == "RightButton" then
+            if db.chests[e.chest[1]] then db.chests[e.chest[1]] = nil; ns.Refresh()
+            else ChestLooted(e.chest, "marked by hand") end
+        elseif e.chest then
+            ns.GuideTo(("Sturdy Chest %d (%s)"):format(e.chest[1], e.chest[2]), e.chest[3], e.chest[4])
+        elseif e.sealed then
+            ns.GuideTo(e.sealed[1] .. " sealed room (" .. e.sealed[3] .. ")", e.sealed[4], e.sealed[5])
         end
     end)
     b:SetScript("OnEnter", function(self)
@@ -335,18 +454,50 @@ end
 
 local function CreateWindow()
     win = TW.CreateWindow({ name = "TippWorksLabyrinthFrame", title = "Labyrinth of Kindo'jan", version = ns.VERSION,
-        width = WIDTH, db = db })
+        width = WIDTH, db = db, onTab = function() ns.Refresh() end, tabs = {
+            { key = "run", label = "This run", title = "Labyrinth of Kindo'jan" },
+            { key = "chests", label = "Chests", title = "Labyrinth Chests" },
+        } })
     win.footer = win:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     win.footer:SetPoint("BOTTOMLEFT", 12, 10)
     win.footer:SetWidth(WIDTH - 24)
     win.footer:SetJustifyH("LEFT")
     win:SetScript("OnShow", function() ns.Refresh() end)
+    win:SelectTab(db.tab == "chests" and "chests" or "run")
+    if WorldMapFrame then
+        WorldMapFrame:HookScript("OnShow", ns.DrawPins)
+        if WorldMapFrame.OnMapChanged then hooksecurefunc(WorldMapFrame, "OnMapChanged", ns.DrawPins) end
+    end
 end
 
 local function Header(text) return { header = text } end
 
-function ns.Refresh()
-    if not win or not run or not win:IsShown() then return end
+local function ChestList()
+    local list = {}
+    local got = 0
+    for _ in pairs(db.chests) do got = got + 1 end
+    list[#list + 1] = Header(("Sturdy Chests  %d/20  |cff888888(each loots once)|r"):format(got))
+    for _, ch in ipairs(CHESTS) do
+        list[#list + 1] = { chest = ch,
+            left = ("  %d. %s"):format(ch[1], ch[2]),
+            right = db.chests[ch[1]] and "|cff33ff33looted|r" or ("|cffffd100%.1f, %.1f|r"):format(ch[3], ch[4]),
+            tip = function() return { ("Sturdy Chest %d"):format(ch[1]), ("%s  %.1f, %.1f"):format(ch[2], ch[3], ch[4]),
+                "Left-click: guide arrow  |  Right-click: mark looted / not looted" } end }
+    end
+    list[#list + 1] = Header("Loa-sealed rooms  |cff888888(2-3 more chests each)|r")
+    for _, r in ipairs(SEALED) do
+        list[#list + 1] = { sealed = r,
+            left = ("  %s seal - %s"):format(r[1], r[3]),
+            right = ("|cff888888Journey %d|r"):format(r[2]),
+            tip = function() return { r[1] .. " sealed room", ("%s  %.1f, %.1f"):format(r[3], r[4], r[5]),
+                ("Opens at Labyrinth Journey rank %d. Its Sturdy Chests give a permanent Labyrinth upgrade and a glove enchant."):format(r[2]),
+                "Left-click: guide arrow" } end }
+    end
+    return list, "|cff888888Flooded Chamber: swim under the two waterfalls on the east side of the Central Chamber, "
+        .. "melt the ice wall with any Fire damage (the Fiery Hexmask works) - 5 more Sturdy Chests.|r"
+end
+
+local function RunList()
     local list = {}
     local here = CurrentChamber()
     list[#list + 1] = Header(("Chambers  %d/9  |cff888888%s|r"):format(DoneCount(),
@@ -355,7 +506,11 @@ function ns.Refresh()
         local st = run.chambers[c.name]
         list[#list + 1] = { chamber = c,
             left = (here == c and "|cffffffff> " or "  ") .. c.name .. (c.special and " |cff888888*|r" or ""),
-            right = st == "done" and "|cff33ff33done|r" or st == "here" and "|cffffd100in progress|r" or "|cff888888-|r",
+            right = (function()
+                local got, total = ChestsIn(c.name)
+                local chests = total > 0 and ("|cff888888chests %d/%d|r  "):format(got, total) or ""
+                return chests .. (st == "done" and "|cff33ff33done|r" or st == "here" and "|cffffd100in progress|r" or "|cff888888-|r")
+            end)(),
             tip = function()
                 local t = { c.name, "Where: " .. c.where }
                 if c.special then t[#t + 1] = "* Can hold a Hexmask or the locked room." end
@@ -392,6 +547,15 @@ function ns.Refresh()
                 return t
             end }
     end
+    return list, #spots > 0 and ("|cff888888" .. table.concat(spots, "  |  ") .. "|r")
+        or "|cff888888* = a spot that can hold a Hexmask or the locked room|r"
+end
+
+function ns.Refresh()
+    if not win or not run or not win:IsShown() then return end
+    ns.DrawPins()
+    local list, footer
+    if db.tab == "chests" then list, footer = ChestList() else list, footer = RunList() end
     for i, e in ipairs(list) do
         local b = rows[i] or Row(i)
         b.entry = (not e.header) and e or nil
@@ -400,9 +564,8 @@ function ns.Refresh()
         b:Show()
     end
     for i = #list + 1, #rows do rows[i]:Hide(); rows[i].entry = nil end
-    win.footer:SetText(#spots > 0 and ("|cff888888" .. table.concat(spots, "  |  ") .. "|r")
-        or "|cff888888* = a spot that can hold a Hexmask or the locked room|r")
-    win:SetHeight(-win.top + #list * ROW_H + 40)
+    win.footer:SetText(footer)
+    win:SetHeight(-win.top + #list * ROW_H + 30 + (tonumber(win.footer:GetStringHeight()) or 12))
 end
 
 ---------------------------------------------------------------------------
@@ -430,6 +593,12 @@ local function Command(rest)
                     run and run.spots[c.name] and (" - " .. run.spots[c.name]) or ""))
             end
         end
+    elseif sub == "chests" then
+        if win then win:SelectTab("chests"); win:Show() end
+    elseif sub == "pins" then
+        db.hidePins = not db.hidePins or nil
+        Print("chest pins on the Labyrinth map " .. (db.hidePins and "hidden." or "shown."))
+        ns.DrawPins()
     elseif sub == "where" then
         local c = CurrentChamber()
         Print(("sub-zone '%s', map '%s' -> chamber: %s"):format(tostring(Safe(GetSubZoneText)),
@@ -445,6 +614,8 @@ module = TW.Register({
         { "", "show/hide the Labyrinth window (opens by itself inside)" },
         { "where", "which chamber the addon thinks you're in" },
         { "spots", "the five mask/locked-room spots with coordinates" },
+        { "chests", "open the Chests tab (Sturdy Chests, sealed rooms)" },
+        { "pins", "show/hide the chest pins on the Labyrinth map" },
         { "reset", "start a fresh run list" },
     },
 })
@@ -468,13 +639,14 @@ ev:SetScript("OnEvent", function(self, event, ...)
         self:UnregisterEvent("ADDON_LOADED")
         TippWorksLabyrinthDB = TippWorksLabyrinthDB or {}
         db = TippWorksLabyrinthDB
+        db.chests = db.chests or {}
         run = db.run
         if not run then NewRun("first load") end
         TW.Log("INFO", "TippWorks-Labyrinth v%s loaded", ns.VERSION)
         CreateWindow()
         for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA",
             "SCENARIO_CRITERIA_UPDATE", "SCENARIO_UPDATE", "UNIT_AURA", "QUEST_ACCEPTED", "QUEST_LOG_UPDATE", "QUEST_REMOVED",
-            "CHAT_MSG_LOOT" }) do self:RegisterEvent(e) end
+            "CHAT_MSG_LOOT", "LOOT_OPENED" }) do self:RegisterEvent(e) end
         C_Timer.NewTicker(1, function()
             if not inside then return end
             TW.Guard("maze scan", function()
@@ -512,6 +684,8 @@ ev:SetScript("OnEvent", function(self, event, ...)
         TW.Guard("maze zone", MarkChamber, c, "here", "entered")
     elseif event == "UNIT_AURA" then
         if ... == "player" then TW.Guard("maze auras", ScanAuras) end
+    elseif event == "LOOT_OPENED" then
+        TW.Guard("maze loot", OnLoot)
     elseif event == "CHAT_MSG_LOOT" then
         local msg = ...
         if Readable(msg) then
