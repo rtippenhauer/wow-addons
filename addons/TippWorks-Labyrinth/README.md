@@ -18,7 +18,8 @@ For the Labyrinth of Kindo'jan, the 12.1.5 mega-delve. The window opens by itsel
   the buff ends) or you mark it opened. The "Door" row: left-click for the arrow, right-click to mark it
   opened. `/tw maze door` marks the door where you're standing if the addon missed it.
 - **Chests tab:** the **20 Sturdy Chests** that need nothing to reach, by chamber with coordinates. Sturdy
-  Chests loot **once per character**, so these stay ticked across runs. When you open loot right beside one
+  Chests loot **once per warband**: a chest opened on one character can't be looted on another, so the
+  list is shared by all your characters and stays ticked across runs. When you open loot right beside one
   (within about 2% of the map), it's ticked automatically. Left-click a chest for the guide arrow;
   right-click marks it looted or not. Unlooted ones also show as gold pins on the Labyrinth's world map.
   Our padlock pins on the sealed rooms are off by default, since the game marks sealed doors itself (`/tw maze padlocks` turns them on; a room's padlock goes once you've been inside, remembered per

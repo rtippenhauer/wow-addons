@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.4.1"
+ns.VERSION = "1.5.0"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -89,6 +89,7 @@ local ICON_LOCK = "Interface\\LFGFrame\\UI-LFG-ICON-LOCK"
 local WIDTH, ROW_H = 330, 17
 
 local db, run, win
+local warband -- account-wide (TippWorksLabyrinthAccountDB): Sturdy Chests loot once per warband
 local rows = {}
 
 ---------------------------------------------------------------------------
@@ -445,22 +446,23 @@ local function GuideQuest(questID)
 end
 
 ---------------------------------------------------------------------------
--- Sturdy Chests (looted once per character: db.chests[n] = time looted)
+-- Sturdy Chests: looted once per WARBAND (a chest opened on one character
+-- can't be looted on another), so warband.chests[n] = time looted, account-wide.
 ---------------------------------------------------------------------------
 local function ChestsIn(chamber)
     local got, total = 0, 0
     for _, ch in ipairs(CHESTS) do
         if ch[2] == chamber then
             total = total + 1
-            if db.chests[ch[1]] then got = got + 1 end
+            if warband.chests[ch[1]] then got = got + 1 end
         end
     end
     return got, total
 end
 
 local function ChestLooted(ch, how)
-    if db.chests[ch[1]] then return end
-    db.chests[ch[1]] = time()
+    if warband.chests[ch[1]] then return end
+    warband.chests[ch[1]] = time()
     TW.Log("MAZE", "Sturdy Chest %d (%s) looted (%s)", ch[1], ch[2], how)
     Print(("Sturdy Chest %d (%s) looted."):format(ch[1], ch[2]))
     ns.Refresh()
@@ -492,7 +494,7 @@ local function OnLoot()
             end
         end
         if #got > 0 then
-            db.chestLoot[best[1]] = got
+            warband.chestLoot[best[1]] = got
             TW.Log("MAZE", "Sturdy Chest %d (%s) gave: %s", best[1], best[2], table.concat(got, ", "))
         end
         ChestLooted(best, "loot opened beside it")
@@ -552,7 +554,7 @@ function ns.DrawPins()
         p:Show()
     end
     for _, ch in ipairs(CHESTS) do
-        if not db.chests[ch[1]] then
+        if not warband.chests[ch[1]] then
             Pin(ch[3], ch[4], ("Sturdy Chest %d"):format(ch[1]), ("%s  %.1f, %.1f"):format(ch[2], ch[3], ch[4]), "VignetteLoot")
         end
     end
@@ -613,7 +615,7 @@ local function Row(i)
         elseif e.quest then
             GuideQuest(e.quest)
         elseif e.chest and btn == "RightButton" then
-            if db.chests[e.chest[1]] then db.chests[e.chest[1]] = nil; ns.Refresh()
+            if warband.chests[e.chest[1]] then warband.chests[e.chest[1]] = nil; ns.Refresh()
             else ChestLooted(e.chest, "marked by hand") end
         elseif e.chest then
             ns.GuideTo(("Sturdy Chest %d (%s)"):format(e.chest[1], e.chest[2]), e.chest[3], e.chest[4])
@@ -676,15 +678,15 @@ local function Header(text) return { header = text } end
 local function ChestList()
     local list = {}
     local got = 0
-    for _ in pairs(db.chests) do got = got + 1 end
-    list[#list + 1] = Header(("Sturdy Chests  %d/20  |cff888888(each loots once)|r"):format(got))
+    for _ in pairs(warband.chests) do got = got + 1 end
+    list[#list + 1] = Header(("Sturdy Chests  %d/20  |cff888888(once per warband)|r"):format(got))
     for _, ch in ipairs(CHESTS) do
         list[#list + 1] = { chest = ch,
             left = ("  %d. %s"):format(ch[1], ch[2]),
-            right = db.chests[ch[1]] and "|cff33ff33looted|r" or ("|cffffd100%.1f, %.1f|r"):format(ch[3], ch[4]),
+            right = warband.chests[ch[1]] and "|cff33ff33looted|r" or ("|cffffd100%.1f, %.1f|r"):format(ch[3], ch[4]),
             tip = function()
                 local t = { ("Sturdy Chest %d"):format(ch[1]), ("%s  %.1f, %.1f"):format(ch[2], ch[3], ch[4]) }
-                local got = db.chestLoot[ch[1]]
+                local got = warband.chestLoot[ch[1]]
                 if got then
                     t[#t + 1] = "You got: " .. table.concat(got, ", ")
                 else
@@ -896,8 +898,17 @@ ev:SetScript("OnEvent", function(self, event, ...)
         self:UnregisterEvent("ADDON_LOADED")
         TippWorksLabyrinthDB = TippWorksLabyrinthDB or {}
         db = TippWorksLabyrinthDB
-        db.chests = db.chests or {}
-        db.chestLoot = db.chestLoot or {}
+        TippWorksLabyrinthAccountDB = TippWorksLabyrinthAccountDB or {}
+        warband = TippWorksLabyrinthAccountDB
+        warband.chests = warband.chests or {}
+        warband.chestLoot = warband.chestLoot or {}
+        -- Before 1.5.0 chests were saved per character: merge them into the warband list.
+        if db.chests or db.chestLoot then
+            for n, t in pairs(db.chests or {}) do warband.chests[n] = warband.chests[n] or t end
+            for n, l in pairs(db.chestLoot or {}) do warband.chestLoot[n] = warband.chestLoot[n] or l end
+            db.chests, db.chestLoot = nil, nil
+            TW.Log("MAZE", "chest list moved to the warband list")
+        end
         db.rooms = db.rooms or {}
         run = db.run
         if not run then NewRun("first load") end
