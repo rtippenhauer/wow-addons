@@ -21,7 +21,7 @@ For the Labyrinth of Kindo'jan, the 12.1.5 mega-delve. The window opens by itsel
   Chests loot **once per character**, so these stay ticked across runs. When you open loot right beside one
   (within about 2% of the map), it's ticked automatically. Left-click a chest for the guide arrow;
   right-click marks it looted or not. Unlooted ones also show as gold pins on the Labyrinth's world map.
-  Each sealed room shows a **padlock** on the map until you've been inside it (remembered per
+  Our padlock pins on the sealed rooms are off by default, since the game marks sealed doors itself (`/tw maze padlocks` turns them on; a room's padlock goes once you've been inside, remembered per
   character; right-click its row to mark it opened or locked). The tab also lists the **9 Loa-sealed rooms** (2-3 more chests each, opened at Labyrinth Journey ranks
   3/5/7/9) and how to reach the **Flooded Chamber**: swim under the two waterfalls on the east side of the
   Central Chamber, then melt the ice wall with any Fire damage. The Run tab shows "chests got/total" per chamber.

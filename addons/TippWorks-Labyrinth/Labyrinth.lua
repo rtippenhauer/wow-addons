@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.3.0"
+ns.VERSION = "1.3.1"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -508,9 +508,10 @@ function ns.DrawPins()
             run.hasKey and "You have the Archaic Amani Key - open it." or "Needs the Archaic Amani Key from the Keeper of the Key.",
             nil, ICON_KEY)
     end
-    -- Loa-sealed rooms: padlock until you've been inside.
+    -- Loa-sealed rooms: padlock until you've been inside. Off by default - the
+    -- game already marks sealed doors itself (/tw maze padlocks turns them on).
     for i, r in ipairs(SEALED) do
-        if not db.rooms[i] then
+        if db.showPadlocks and not db.rooms[i] then
             Pin(r[4], r[5], r[1] .. " sealed room", ("%s - opens at Labyrinth Journey rank %d."):format(r[3], r[2]), nil, ICON_LOCK)
         end
     end
@@ -755,6 +756,10 @@ local function Command(rest)
         ns.Refresh()
     elseif sub == "chests" then
         if win then win:SelectTab("chests"); win:Show() end
+    elseif sub == "padlocks" then
+        db.showPadlocks = not db.showPadlocks or nil
+        Print("padlocks on the Loa-sealed rooms " .. (db.showPadlocks and "shown." or "hidden (the game marks sealed doors itself)."))
+        ns.DrawPins()
     elseif sub == "pins" then
         db.hidePins = not db.hidePins or nil
         Print("chest pins on the Labyrinth map " .. (db.hidePins and "hidden." or "shown."))
@@ -777,6 +782,7 @@ module = TW.Register({
         { "chests", "open the Chests tab (Sturdy Chests, sealed rooms)" },
         { "door", "mark the locked door where you're standing (key icon on the map)" },
         { "pins", "show/hide the chest pins on the Labyrinth map" },
+        { "padlocks", "show/hide padlocks on the Loa-sealed rooms (off by default)" },
         { "reset", "start a fresh run list" },
     },
 })
