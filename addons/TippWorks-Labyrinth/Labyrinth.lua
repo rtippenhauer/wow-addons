@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.2.0"
+ns.VERSION = "1.3.0"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -82,6 +82,10 @@ local ROOM_REWARDS = {
 local CHEST_UNIQUES = "Amani Effigy, Hexbearer's Pauldrons, Effigy of Corrosion, Ancient Amani Mural, Brown Amani Tapestry"
 
 local CHEST_LOOT_RANGE = 0.02 -- map fraction (~2%): loot opened this close to a chest's spot = that chest
+local ROOM_ENTER_RANGE = 0.015 -- standing this close to a sealed room's spot = you've been inside it
+local KEY_NAME = "Archaic Amani Key"
+local ICON_KEY = "Interface\\Icons\\INV_Misc_Key_03"
+local ICON_LOCK = "Interface\\LFGFrame\\UI-LFG-ICON-LOCK"
 local WIDTH, ROW_H = 330, 17
 
 local db, run, win
@@ -197,18 +201,71 @@ local function ScanScenario()
     end
 end
 
+-- The key: in your bags = you have it; gone again after that = the door was opened.
+local function CheckKey()
+    local count = (C_Item and C_Item.GetItemCount and Safe(C_Item.GetItemCount, KEY_NAME))
+        or (GetItemCount and Safe(GetItemCount, KEY_NAME)) or 0
+    if count > 0 then
+        if not run.keyInBags then
+            run.keyInBags, run.hasKey = true, true
+            TW.Log("MAZE", "%s is in your bags", KEY_NAME)
+            if run.door and not run.doorOpened then Print("you have the |cffffd100key|r - the arrow can take you to the locked door (/tw maze door).") end
+            ns.Refresh()
+        end
+    elseif run.keyInBags and not run.doorOpened then
+        run.doorOpened = true
+        TW.Log("MAZE", "%s used - locked door opened", KEY_NAME)
+        Print("locked room |cff33ff33opened|r.")
+        ns.Refresh()
+    end
+end
+
+-- Standing inside a Loa-sealed room (at its spot): it's open for you from now on.
+local function CheckSealedRooms()
+    local p = C_Map.GetPlayerMapPosition(MAZE_MAP, "player")
+    if not p then return end
+    for i, r in ipairs(SEALED) do
+        if not db.rooms[i] and math.sqrt((p.x - r[4] / 100) ^ 2 + (p.y - r[5] / 100) ^ 2) <= ROOM_ENTER_RANGE then
+            db.rooms[i] = time()
+            TW.Log("MAZE", "%s sealed room (%s) entered - padlock removed", r[1], r[3])
+            Print(("%s sealed room (%s) opened."):format(r[1], r[3]))
+            ns.Refresh()
+        end
+    end
+end
+
 local function ScanAuras()
     if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return end
-    for i = 1, 40 do
-        local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, "HELPFUL")
-        if not ok or type(a) ~= "table" then break end
-        if Readable(a.name) then
-            local m = MaskByName(a.name)
-            if m then MaskFound(m, "buff: " .. a.name)
-            elseif a.name:lower():find("mask", 1, true) or a.name:lower():find("hex", 1, true) then
-                Note("aura:" .. a.name, "buff on you: %s (spell %s)", a.name, tostring(a.spellId))
+    local keyNow
+    for _, filter in ipairs({ "HELPFUL", "HARMFUL" }) do
+        for i = 1, 40 do
+            local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, filter)
+            if not ok or type(a) ~= "table" then break end
+            if Readable(a.name) and type(a.name) == "string" then
+                local lower = a.name:lower()
+                local m = MaskByName(a.name)
+                if m then MaskFound(m, "buff: " .. a.name)
+                elseif lower:find("mask", 1, true) or lower:find("hex", 1, true) then
+                    Note("aura:" .. a.name, "buff on you: %s (spell %s)", a.name, tostring(a.spellId))
+                end
+                -- The key can be a buff instead of a bag item.
+                if lower:find("key", 1, true) then
+                    keyNow = a.name
+                    Note("keyaura:" .. a.name, "key buff on you: %s (spell %s)", a.name, tostring(a.spellId))
+                end
             end
         end
+    end
+    if keyNow and not run.keyBuff then
+        run.keyBuff, run.hasKey = true, true
+        Print("you have the |cffffd100key|r (" .. keyNow .. ")" .. (run.door and " - head for the locked door." or " - now find the locked door."))
+        ns.Refresh()
+    elseif not keyNow and run.keyBuff and not run.doorOpened then
+        -- The key buff is gone: it was used on the door.
+        run.keyBuff, run.doorOpened = nil, true
+        TW.Log("MAZE", "key buff gone - locked door opened")
+        Print("locked room |cff33ff33opened|r.")
+        ns.Refresh()
     end
 end
 
@@ -233,7 +290,17 @@ local function ScanMarkers()
                 run.lockedSeen = true
                 local c = CurrentChamber()
                 if c and c.special then run.spots[c.name] = "Locked room" end
+                -- Where the door is on the Labyrinth map: the marker's own position,
+                -- else the mask/locked-room spot of the chamber you're in.
+                local mp = Safe(C_VignetteInfo.GetVignettePosition, guid, MAZE_MAP)
+                if mp and Readable(mp.x) then run.door = { x = mp.x * 100, y = mp.y * 100 }
+                elseif c and c.spot then run.door = { x = c.spot[1], y = c.spot[2] } end
                 TW.Log("MAZE", "locked room marker: %s in %s (%s)", name, c and c.name or "?", where)
+                if not run.doorOpened then
+                    Print("|cffffd100Locked door|r found" .. (c and (" in " .. c.name) or "") .. (run.hasKey and
+                        " - you have the key, go open it!" or " - marked with a key icon on the map until you open it."))
+                end
+                ns.Refresh()
             end
         end
     end
@@ -406,30 +473,45 @@ function ns.DrawPins()
     local w, h = canvas:GetSize()
     local size = math.max(12, (w or 0) / 55)
     local n = 0
+    local function Pin(x, y, title, line, atlas, texture)
+        n = n + 1
+        local p = pins[n]
+        if not p then
+            p = CreateFrame("Frame", nil, overlay)
+            p.tex = p:CreateTexture(nil, "OVERLAY")
+            p.tex:SetAllPoints()
+            p:EnableMouse(true)
+            p:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine(self.title)
+                GameTooltip:AddLine(self.line, 1, 1, 1, true)
+                GameTooltip:Show()
+            end)
+            p:SetScript("OnLeave", GameTooltip_Hide)
+            pins[n] = p
+        end
+        if atlas then p.tex:SetAtlas(atlas) else p.tex:SetTexture(texture) end
+        p.title, p.line = title, line
+        p:SetSize(size, size)
+        p:ClearAllPoints()
+        p:SetPoint("CENTER", overlay, "TOPLEFT", x / 100 * w, -y / 100 * h)
+        p:Show()
+    end
     for _, ch in ipairs(CHESTS) do
         if not db.chests[ch[1]] then
-            n = n + 1
-            local p = pins[n]
-            if not p then
-                p = CreateFrame("Frame", nil, overlay)
-                p.tex = p:CreateTexture(nil, "OVERLAY")
-                p.tex:SetAllPoints()
-                p.tex:SetAtlas("VignetteLoot")
-                p:EnableMouse(true)
-                p:SetScript("OnEnter", function(self)
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    GameTooltip:AddLine(("Sturdy Chest %d"):format(self.ch[1]))
-                    GameTooltip:AddLine(("%s  %.1f, %.1f"):format(self.ch[2], self.ch[3], self.ch[4]), 1, 1, 1)
-                    GameTooltip:Show()
-                end)
-                p:SetScript("OnLeave", GameTooltip_Hide)
-                pins[n] = p
-            end
-            p.ch = ch
-            p:SetSize(size, size)
-            p:ClearAllPoints()
-            p:SetPoint("CENTER", overlay, "TOPLEFT", ch[3] / 100 * w, -ch[4] / 100 * h)
-            p:Show()
+            Pin(ch[3], ch[4], ("Sturdy Chest %d"):format(ch[1]), ("%s  %.1f, %.1f"):format(ch[2], ch[3], ch[4]), "VignetteLoot")
+        end
+    end
+    -- Locked door this run: key icon until it's opened.
+    if run and run.door and not run.doorOpened then
+        Pin(run.door.x, run.door.y, "Locked door",
+            run.hasKey and "You have the Archaic Amani Key - open it." or "Needs the Archaic Amani Key from the Keeper of the Key.",
+            nil, ICON_KEY)
+    end
+    -- Loa-sealed rooms: padlock until you've been inside.
+    for i, r in ipairs(SEALED) do
+        if not db.rooms[i] then
+            Pin(r[4], r[5], r[1] .. " sealed room", ("%s - opens at Labyrinth Journey rank %d."):format(r[3], r[2]), nil, ICON_LOCK)
         end
     end
 end
@@ -467,6 +549,17 @@ local function Row(i)
             else ChestLooted(e.chest, "marked by hand") end
         elseif e.chest then
             ns.GuideTo(("Sturdy Chest %d (%s)"):format(e.chest[1], e.chest[2]), e.chest[3], e.chest[4])
+        elseif e.sealed and btn == "RightButton" then
+            db.rooms[e.room] = (not db.rooms[e.room]) and time() or nil
+            TW.Log("MAZE", "%s sealed room (%s) marked %s by hand", e.sealed[1], e.sealed[3], db.rooms[e.room] and "opened" or "locked")
+            ns.Refresh()
+        elseif e.door and btn == "RightButton" then
+            run.doorOpened = not run.doorOpened or nil
+            TW.Log("MAZE", "locked door marked %s by hand", run.doorOpened and "opened" or "not opened")
+            ns.Refresh()
+        elseif e.door then
+            if run.door then ns.GuideTo("Locked door", run.door.x, run.door.y)
+            else Print("the locked door hasn't been found yet this run (/tw maze door marks it where you stand).") end
         elseif e.sealed then
             ns.GuideTo(e.sealed[1] .. " sealed room (" .. e.sealed[3] .. ")", e.sealed[4], e.sealed[5])
         end
@@ -527,17 +620,17 @@ local function ChestList()
             end }
     end
     list[#list + 1] = Header("Loa-sealed rooms  |cff888888(2-3 more chests each)|r")
-    for _, r in ipairs(SEALED) do
-        list[#list + 1] = { sealed = r,
+    for i, r in ipairs(SEALED) do
+        list[#list + 1] = { sealed = r, room = i,
             left = ("  %s seal - %s"):format(r[1], r[3]),
-            right = ("|cff888888Journey %d|r"):format(r[2]),
+            right = db.rooms[i] and "|cff33ff33opened|r" or ("|cff888888Journey %d - locked|r"):format(r[2]),
             tip = function()
                 local t = { r[1] .. " sealed room", ("%s  %.1f, %.1f"):format(r[3], r[4], r[5]),
                     ("Opens at Labyrinth Journey rank %d."):format(r[2]),
                     "Seal reward: " .. SEAL_REWARDS[r[1]] }
                 local special = ROOM_REWARDS[r[1] .. "@" .. r[3]]
                 if special then t[#t + 1] = "In this room: " .. special end
-                t[#t + 1] = "Left-click: guide arrow"
+                t[#t + 1] = "Left-click: guide arrow  |  Right-click: mark opened / locked"
                 return t
             end }
     end
@@ -582,8 +675,17 @@ local function RunList()
     end
     local spots = {}
     for _, c in ipairs(CHAMBERS) do if c.special and run.spots[c.name] then spots[#spots + 1] = c.name .. ": " .. run.spots[c.name] end end
-    list[#list + 1] = Header("Locked room" .. (run.lockedSeen and " |cff33ff33seen|r" or "") ..
-        (run.keeperSeen and "  |cffffd100Keeper on map|r" or ""))
+    list[#list + 1] = Header("Locked room" .. (run.keeperSeen and "  |cffffd100Keeper on map|r" or ""))
+    list[#list + 1] = { door = true,
+        left = "  Door" .. (run.door and ((" %.1f, %.1f"):format(run.door.x, run.door.y)) or " - not found yet"),
+        right = run.doorOpened and "|cff33ff33opened|r" or run.hasKey and "|cffffd100you have the key|r"
+            or "|cff888888no key yet|r",
+        tip = function()
+            return { "Locked room", "The key (Archaic Amani Key) drops from the Keeper of the Key, anywhere in the Labyrinth.",
+                "The door shows as a key icon on the map until it's opened.",
+                "Left-click: arrow to the door  |  Right-click: mark opened / not opened",
+                "/tw maze door: mark the door where you're standing" }
+        end }
     local qn = 0
     for id, title in pairs(AllQuests()) do
         if qn == 0 then list[#list + 1] = Header("Quests from the Labyrinth") end
@@ -644,6 +746,13 @@ local function Command(rest)
                     run and run.spots[c.name] and (" - " .. run.spots[c.name]) or ""))
             end
         end
+    elseif sub == "door" then
+        local p = C_Map.GetPlayerMapPosition(MAZE_MAP, "player")
+        if not p or not InLabyrinth() then Print("stand at the locked door inside the Labyrinth, then try again.") return end
+        run.door, run.lockedSeen, run.doorOpened = { x = p.x * 100, y = p.y * 100 }, true, nil
+        TW.Log("MAZE", "locked door marked by hand at %.1f, %.1f", p.x * 100, p.y * 100)
+        Print(("locked door marked at %.1f, %.1f - key icon on the map until it's opened."):format(p.x * 100, p.y * 100))
+        ns.Refresh()
     elseif sub == "chests" then
         if win then win:SelectTab("chests"); win:Show() end
     elseif sub == "pins" then
@@ -666,6 +775,7 @@ module = TW.Register({
         { "where", "which chamber the addon thinks you're in" },
         { "spots", "the five mask/locked-room spots with coordinates" },
         { "chests", "open the Chests tab (Sturdy Chests, sealed rooms)" },
+        { "door", "mark the locked door where you're standing (key icon on the map)" },
         { "pins", "show/hide the chest pins on the Labyrinth map" },
         { "reset", "start a fresh run list" },
     },
@@ -692,17 +802,19 @@ ev:SetScript("OnEvent", function(self, event, ...)
         db = TippWorksLabyrinthDB
         db.chests = db.chests or {}
         db.chestLoot = db.chestLoot or {}
+        db.rooms = db.rooms or {}
         run = db.run
         if not run then NewRun("first load") end
         TW.Log("INFO", "TippWorks-Labyrinth v%s loaded", ns.VERSION)
         CreateWindow()
         for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA",
             "SCENARIO_CRITERIA_UPDATE", "SCENARIO_UPDATE", "UNIT_AURA", "QUEST_ACCEPTED", "QUEST_LOG_UPDATE", "QUEST_REMOVED",
-            "CHAT_MSG_LOOT", "LOOT_OPENED" }) do self:RegisterEvent(e) end
+            "CHAT_MSG_LOOT", "LOOT_OPENED", "BAG_UPDATE_DELAYED" }) do self:RegisterEvent(e) end
         C_Timer.NewTicker(1, function()
             if not inside then return end
             TW.Guard("maze scan", function()
                 MarkChamber(CurrentChamber(), "here", "entered")
+                CheckSealedRooms()
                 ScanMarkers()
                 ScanScenario()
             end)
@@ -736,6 +848,8 @@ ev:SetScript("OnEvent", function(self, event, ...)
         TW.Guard("maze zone", MarkChamber, c, "here", "entered")
     elseif event == "UNIT_AURA" then
         if ... == "player" then TW.Guard("maze auras", ScanAuras) end
+    elseif event == "BAG_UPDATE_DELAYED" then
+        TW.Guard("maze key", CheckKey)
     elseif event == "LOOT_OPENED" then
         TW.Guard("maze loot", OnLoot)
     elseif event == "CHAT_MSG_LOOT" then
@@ -743,10 +857,11 @@ ev:SetScript("OnEvent", function(self, event, ...)
         if Readable(msg) then
             local m = MaskByName(msg)
             if m then MaskFound(m, "loot message") end
-            if msg:find("Amani Key", 1, true) then
+            if msg:find("Amani Key", 1, true) and not run.hasKey then
                 run.hasKey = true
-                Print("you have the |cffffd100key|r - now find the locked room.")
+                Print("you have the |cffffd100key|r" .. (run.door and " - head for the locked door." or " - now find the locked door."))
                 TW.Log("MAZE", "key looted: %s", msg)
+                ns.Refresh()
             end
         end
     else
