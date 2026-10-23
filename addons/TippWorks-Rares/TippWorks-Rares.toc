@@ -2,7 +2,7 @@
 ## Title: |cffe6a23cTippenhauer Works|r - Coiled Rares
 ## Notes: Coiled Isle daily rares (coffer key shards): kill tracking, route on the map, waypoints and a target popup.
 ## Author: rtippenhauer (Tippenhauer Works)
-## Version: 1.0.3
+## Version: 1.0.4
 ## X-Website: https://github.com/rtippenhauer/wow-addons
 ## Category: Tippenhauer Works
 ## Group: TippWorks-Core

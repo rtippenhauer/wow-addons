@@ -220,6 +220,7 @@ end
 -- Kill detection
 ---------------------------------------------------------------------------
 local SetWaypoint
+local tomtomUID, waypointFor -- the one waypoint we placed, so it can be removed again
 local ABSENT_RANGE = 100 -- yards, flat distance, so flying over a spawn counts
 local SEEN_FRESH = 60    -- seconds a sighting counts as "up"
 local seenAt = {}
@@ -254,6 +255,7 @@ local function MarkKilled(name, silent, how)
     db.absent[name] = nil
     ns.Log("RARE", "%s killed (%s)", name, how or "unit seen dead")
     if not silent then Print(name .. " marked as killed for today.") end
+    ns.ClearWaypoint(name)
     if db.autoNext then
         local r = NextOnRoute()
         if r then SetWaypoint(r, true) end
@@ -369,16 +371,27 @@ function SetWaypoint(r, isAuto)
         Print("couldn't find the Coiled Isle map yet - try again once you're in the zone.")
         return
     end
+    ns.ClearWaypoint() -- one waypoint at a time: TomTom would otherwise keep every old one
     if TomTom and TomTom.AddWaypoint then
-        TomTom:AddWaypoint(map, x / 100, y / 100, { title = r.name, from = ADDON })
+        local ok, uid = pcall(TomTom.AddWaypoint, TomTom, map, x / 100, y / 100, { title = r.name, from = ADDON })
+        if ok then tomtomUID = uid end
     end
     if C_Map.CanSetUserWaypointOnMap(map) then
         C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(map, x / 100, y / 100))
         C_SuperTrack.SetSuperTrackedUserWaypoint(true)
     end
+    waypointFor = r.name
     Print(("%swaypoint set: %s (%.1f, %.1f)"):format(isAuto and "next " or "", r.name, x, y))
 end
 ns.SetWaypoint = SetWaypoint
+
+-- Removes our waypoint (TomTom's and the map pin); with a name, only if it points at that rare.
+function ns.ClearWaypoint(name)
+    if name and name ~= waypointFor then return end
+    if tomtomUID and TomTom and TomTom.RemoveWaypoint then pcall(TomTom.RemoveWaypoint, TomTom, tomtomUID) end
+    if waypointFor and C_Map.ClearUserWaypoint then C_Map.ClearUserWaypoint() end
+    tomtomUID, waypointFor = nil, nil
+end
 
 -- The route is saved and stays put until New Route is pressed again.
 function ns.GetRoute()

@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.10"
+ns.VERSION = "1.0.11"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -109,12 +109,21 @@ local stalled = nil
 local RESULT = { [3] = "throttled by WoW", [5] = "not in a group", [9] = "general error" }
 
 -- Found/looted messages come by the hundred in the Labyrinth and pushed the
--- whole run out of the log: those are counted and summed up every 30 seconds.
-local syncSent, syncGot = 0, 0
+-- whole run out of the log: those (and WoW's throttle pauses) are counted and
+-- summed up every 30 seconds. Version hellos are logged once per player and version.
+local syncSent, syncGot, syncPauses = 0, 0, 0
+local versionSeen = {}
 local function LogSync(dir, who, msg)
-    local tag = msg:sub(1, 1)
+    local tag, rest = msg:sub(1, 1), msg:sub(3)
     if tag == "F" or tag == "L" then
         if dir == "sent" then syncSent = syncSent + 1 else syncGot = syncGot + 1 end
+    elseif tag == "H" or tag == "R" then
+        local key = dir .. who .. rest
+        if not versionSeen[key] then
+            versionSeen[key] = true
+            ns.Log("SYNC", dir == "sent" and "our version %s sent to %s" or "%s runs Curios %s",
+                dir == "sent" and rest or who, dir == "sent" and who or rest)
+        end
     elseif dir == "sent" then
         ns.Log("SYNC", "sent to %s: %s", who, msg)
     else
@@ -122,9 +131,10 @@ local function LogSync(dir, who, msg)
     end
 end
 C_Timer.NewTicker(30, function()
-    if syncSent + syncGot == 0 then return end
-    ns.Log("SYNC", "curiosity updates: %d sent, %d received", syncSent, syncGot)
-    syncSent, syncGot = 0, 0
+    if syncSent + syncGot + syncPauses == 0 then return end
+    ns.Log("SYNC", "curiosity updates: %d sent, %d received%s", syncSent, syncGot,
+        syncPauses > 0 and (", sending paused by WoW's throttle %d times"):format(syncPauses) or "")
+    syncSent, syncGot, syncPauses = 0, 0, 0
 end)
 
 local function SendOne()
@@ -135,13 +145,14 @@ local function SendOne()
     local ok, res = pcall(C_ChatInfo.SendAddonMessage, PREFIX, msg, ch)
     if not ok or (res ~= nil and res ~= true and res ~= SUCCESS) then
         local why = ok and (RESULT[res] or ("code " .. tostring(res))) or "error"
-        if stalled ~= why then -- log a stall once, not once per message
+        if stalled ~= why then -- count a stall once, not once per message
             stalled = why
-            ns.Log("SYNC", "sending paused (%s), %d queued - will keep retrying", why, #outbox)
+            if res == 3 then syncPauses = syncPauses + 1
+            else ns.Log("SYNC", "sending paused (%s), %d queued - will keep retrying", why, #outbox) end
         end
         return
     end
-    if stalled then ns.Log("SYNC", "sending resumed"); stalled = nil end
+    stalled = nil
     LogSync("sent", ch, msg)
     table.remove(outbox, 1)
     queued[msg] = nil
