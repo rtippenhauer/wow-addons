@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.5.0"
+ns.VERSION = "1.5.1"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -517,14 +517,40 @@ local function MoveToBags(e)
     if not SameItem(e) then return false end
     if FreeBagSlots() == 0 then Print("your bags are full.") return false end
     C_Container.UseContainerItem(e.bag, e.slot)
-    TW.Log("BAGS", "moved %s x%d from the bank to sell (%s)", e.name, e.count, e.why)
+    TW.Log("BAGS", "moved %s x%d from the bank (%s)", e.name, e.count, e.why)
     return true
+end
+
+-- WoW only deletes from your bags: move the item out of the bank first, then ask.
+local function MoveThenDelete(e)
+    local before = {}
+    for _, bag in ipairs(BagContainers()) do
+        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID == e.itemID then before[bag .. ":" .. slot] = true end
+        end
+    end
+    if not MoveToBags(e) then return end
+    C_Timer.After(0.5, function() TW.Guard("bags delete from bank", function()
+        for _, bag in ipairs(BagContainers()) do
+            for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                if info and info.itemID == e.itemID and not before[bag .. ":" .. slot] then
+                    AskDelete({ bag = bag, slot = slot, itemID = e.itemID, link = e.link, name = e.name,
+                        count = info.stackCount or e.count, why = e.why })
+                    return
+                end
+            end
+        end
+        Print(e.link .. " is in your bags now - delete it from the Delete tab.")
+        ns.Refresh()
+    end) end)
 end
 
 local function MoveAll()
     if moving then return end
     local list = {}
-    for _, e in ipairs(BankList()) do if e.action == "move" then list[#list + 1] = e end end
+    for _, e in ipairs(BankList()) do list[#list + 1] = e end
     if #list == 0 then Print("nothing in the bank to move.") return end
     moving = true
     local i, moved = 0, 0
@@ -534,7 +560,8 @@ local function MoveAll()
         if not e or not bankOpen or FreeBagSlots() == 0 then
             moving = false
             if moved > 0 then
-                Print(("moved %d item%s to your bags - sell them at the next vendor."):format(moved, moved == 1 and "" or "s"))
+                Print(("moved %d item%s to your bags: sell at the next vendor; what can't be sold is on the Delete tab.")
+                    :format(moved, moved == 1 and "" or "s"))
             end
             if e and bankOpen then Print("your bags are full - sell, then move the rest.") end
             ns.Refresh()
@@ -579,7 +606,7 @@ local function Row(i)
         if db.tab == "auction" then
             if btn == "RightButton" then ToggleHide(e) else LoadForPost(e) end
         elseif db.tab == "bank" and btn ~= "RightButton" then
-            if e.action == "delete" then AskDelete(e)
+            if e.action == "delete" then MoveThenDelete(e)
             elseif MoveToBags(e) then C_Timer.After(0.3, ns.Refresh) end
         elseif btn == "RightButton" or db.tab == "kept" then ToggleKeep(e)
         elseif db.tab == "delete" then AskDelete(e)
@@ -594,7 +621,7 @@ local function Row(i)
         GameTooltip:AddLine("TippWorks: " .. e.why, 1, 0.82, 0, true)
         if e.market then GameTooltip:AddLine("Auction price: " .. Money(e.market) .. " (" .. e.priceNote .. ")", 1, 1, 1) end
         if e.de then GameTooltip:AddLine("Disenchant: ~" .. Money(e.de), 0.64, 0.21, 0.93) end
-        GameTooltip:AddLine(db.tab == "bank" and (e.action == "delete" and "Click: delete (asks first)  |  Right-click: keep it"
+        GameTooltip:AddLine(db.tab == "bank" and (e.action == "delete" and "Click: move to your bags and delete (asks first)  |  Right-click: keep it"
                 or "Click: move to your bags (sell at a vendor)  |  Right-click: keep it")
             or db.tab == "auction" and "Click: load it into Post  |  Right-click: don't list it"
             or db.tab == "delete" and "Left-click: delete (asks first)  |  Right-click: keep it"
@@ -626,7 +653,7 @@ function ns.Refresh()
             local loaded = posting and posting.bag == e.bag and posting.slot == e.slot
             b.right:SetText(loaded and "|cff33ff33in Post|r" or e.market and Money(e.market) or "")
         elseif db.tab == "bank" then
-            b.right:SetText(e.action == "delete" and "|cffff6060delete|r" or ("|cff33ff99to bags|r " .. Money(e.price)))
+            b.right:SetText(e.action == "delete" and "|cffff6060to bags, delete|r" or ("|cff33ff99to bags|r " .. Money(e.price)))
         else
             b.right:SetText(db.tab == "delete" and "|cffff6060delete|r" or (e.price > 0 and Money(e.price) or ""))
         end
@@ -638,12 +665,12 @@ function ns.Refresh()
     win.post:SetShown(db.tab == "auction" and auctionOpen and n > 0 and not tsmUI)
     local toMove = 0
     if db.tab == "bank" then for _, e in ipairs(list) do if e.action == "move" then toMove = toMove + 1 end end end
-    win.move:SetShown(db.tab == "bank" and bankOpen and toMove > 0)
+    win.move:SetShown(db.tab == "bank" and bankOpen and n > 0)
     if db.tab == "bank" then
         win.sell:Hide()
         footer = not bankOpen and "|cff888888Open your bank or warband bank to check it.|r"
             or n == 0 and "|cff888888Nothing in the bank to sell or delete.|r"
-            or ("|cff888888%d to move to your bags and sell, %d to delete.|r")
+            or ("|cff888888%d to sell, %d to delete - both go to your bags first.|r")
                 :format(toMove, n - toMove)
     elseif db.tab == "auction" then
         win.sell:Hide()

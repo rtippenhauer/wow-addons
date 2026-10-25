@@ -47,7 +47,8 @@ TSM replaces the Auction House window, so drag the items into your TSM group and
 
 When you open your bank or warband bank and something there matches your rules, the **Bank** tab opens. Vendors only
 buy from your bags, so items to sell say *to bags*: click one (or **Move all**) and it moves to your bags for the next
-vendor. Items that can't be sold are deleted right there (asks first). Right-click to keep an item.
+vendor. WoW only deletes from your bags, so clicking an item that can't be sold moves it to your bags first and then
+asks to delete it. **Move all** moves both kinds. Right-click to keep an item.
 
 ## Other selling addons
 
