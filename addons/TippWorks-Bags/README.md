@@ -25,6 +25,19 @@ sale can be bought back. Everything sold or deleted is in `/tw log`.
 
 Settings: Options > AddOns > Tippenhauer Works > Bag Manager.
 
+## Auction House
+
+When you open the Auction House, the **Auction** tab lists what could be posted: unbound green-or-better gear,
+recipes, gems, enhancements, pets and mounts (`/tw bags mats` adds crafting materials). Click one and it goes
+into Blizzard's Post screen with the usual suggested price; click **Post**, and the next item loads by itself.
+**Load next** starts from the top. Right-click an item to leave it off the list (`/tw bags unhide` brings them back).
+Gear you haven't collected the appearance of is marked, in case you'd rather learn it.
+
+## Other selling addons
+
+If CrapAway (or Scrap, Peddler, AutoVendor, Vendor, SellJunk) is also loaded, Bags warns at login and offers to
+disable it. **Keep both** stops the warning for that addon.
+
 ## Commands
 
 | Command | What it does |
@@ -36,7 +49,11 @@ Settings: Options > AddOns > Tippenhauer Works > Bag Manager.
 | `/tw bags delete` | Turn on/off offering to delete items that can't be sold |
 | `/tw bags transmog` / `tradeable` | Turn a protection on/off |
 | `/tw bags auto` | Sell at the vendor without asking |
+| `/tw bags auction` | Show the Auction tab |
+| `/tw bags next` | Turn on/off loading the next item after you post |
+| `/tw bags mats` | Turn on/off listing crafting materials on the Auction tab |
+| `/tw bags unhide` | Bring back items you right-clicked off the Auction tab |
 | `/tw bags gap <number>` | Item levels below yours that count as low (default 20) |
 | `/tw bags keep <item>` | Never sell this item; again to undo |
 
-Requires **TippWorks-Core**. Replaces CrapAway (disable it, or both will sell junk).
+Requires **TippWorks-Core**. Replaces CrapAway (it warns you if CrapAway is still on).

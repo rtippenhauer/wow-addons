@@ -7,10 +7,12 @@ local TW = TippWorks
 -- can't be sold can be deleted, one confirmed click each.
 -- Never touched: uncollected transmog, equipment-set items, items you keep,
 -- unbound blue+ gear (Auction House) and anything above epic.
+-- At the Auction House, the Auction tab lists what could be posted; click one
+-- and it goes into Blizzard's Post screen, and after you post the next loads.
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.0"
+ns.VERSION = "1.1.0"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -25,6 +27,7 @@ local WIDTH, ROW_H = 380, 18
 local DEFAULTS = {
     junk = true, lowLevel = false, wrongArmor = false, quest = true, offerDelete = true,
     protectTransmog = true, protectTradeable = true, autoSell = false, ilvlGap = 20,
+    autoNext = true, auctionMats = false,
 }
 local function Opt(k) if db[k] == nil then return DEFAULTS[k] end return db[k] end
 
@@ -47,6 +50,16 @@ local SLOTS = {
     INVTYPE_WEAPONOFFHAND = { 17 }, INVTYPE_HOLDABLE = { 17 }, INVTYPE_SHIELD = { 17 },
     INVTYPE_RANGED = { 16 }, INVTYPE_RANGEDRIGHT = { 16 },
 }
+
+-- What can go on the Auction House besides unbound gear (item class -> label).
+local AUCTION_KIND = { [3] = "gem", [8] = "enhancement", [9] = "recipe", [16] = "glyph", [19] = "profession gear" }
+local function AuctionKind(classID, subclassID, quality)
+    if classID == ARMOR_CLASS or classID == WEAPON_CLASS then return quality >= 2 and "unbound gear" or nil end
+    if AUCTION_KIND[classID] then return AUCTION_KIND[classID] end
+    if classID == 15 and subclassID == 2 then return "pet" end
+    if classID == 15 and subclassID == 5 then return "mount" end
+    if classID == 7 and Opt("auctionMats") then return "material" end
+end
 
 local function ItemLevel(link)
     local lvl = C_Item.GetDetailedItemLevelInfo and Safe(C_Item.GetDetailedItemLevelInfo, link)
@@ -83,10 +96,19 @@ end
 ---------------------------------------------------------------------------
 -- Sorting the bags
 ---------------------------------------------------------------------------
--- Returns { sell = {...}, delete = {...}, kept = {...} }; each entry is
+local auctionOpen = false
+
+-- False only when the Auction House says the item can't be posted (it only knows while open).
+local function Postable(bag, slot)
+    if not auctionOpen or not (C_AuctionHouse and C_AuctionHouse.IsSellItemValid and ItemLocation) then return true end
+    local ok, valid = pcall(C_AuctionHouse.IsSellItemValid, ItemLocation:CreateFromBagAndSlot(bag, slot), false)
+    return not ok or valid ~= false
+end
+
+-- Returns { sell = {...}, delete = {...}, kept = {...}, auction = {...} }; each entry is
 -- { bag, slot, itemID, link, name, count, price, why }.
 local function Scan()
-    local out = { sell = {}, delete = {}, kept = {} }
+    local out = { sell = {}, delete = {}, kept = {}, auction = {} }
     local _, class = UnitClass("player")
     local myArmor = ARMOR_TYPE[class or ""]
     for bag = 0, (NUM_TOTAL_BAG_FRAMES or NUM_BAG_SLOTS or 4) do
@@ -143,6 +165,20 @@ local function Scan()
                         e.why = why
                         out.sell[#out.sell + 1] = e
                     end
+                    -- Could go on the Auction House (anything not headed for the vendor).
+                    local kind = (not why or keep) and not info.isBound and quality and quality >= 1
+                        and not db.noAuction[info.itemID] and AuctionKind(classID, subclassID, quality)
+                    if kind and Postable(bag, slot) then
+                        local a = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
+                            count = e.count, price = e.price, quality = quality, why = kind }
+                        if kind == "unbound gear" then
+                            a.ilvl = ItemLevel(link)
+                            if Opt("protectTransmog") and UncollectedAppearance(link) then
+                                a.why = kind .. " - |cffff9933appearance not collected|r"
+                            end
+                        end
+                        out.auction[#out.auction + 1] = a
+                    end
                 end
             end
         end
@@ -151,6 +187,11 @@ local function Scan()
     table.sort(out.sell, function(a, b)
         if (a.why == "junk") ~= (b.why == "junk") then return a.why == "junk" end
         return a.price > b.price
+    end)
+    table.sort(out.auction, function(a, b)
+        if a.quality ~= b.quality then return a.quality > b.quality end
+        if (a.ilvl or 0) ~= (b.ilvl or 0) then return (a.ilvl or 0) > (b.ilvl or 0) end
+        return a.name < b.name
     end)
     return out
 end
@@ -214,6 +255,54 @@ StaticPopupDialogs["TIPPWORKS_BAGS_DELETE"] = {
     timeout = 0, whileDead = true, hideOnEscape = true, showAlert = true, preferredIndex = 3,
 }
 
+---------------------------------------------------------------------------
+-- Auction House: load items into Blizzard's Post screen, one after another
+---------------------------------------------------------------------------
+local posting -- the item last loaded into the Post screen
+
+local function StillThere(e)
+    local info = C_Container.GetContainerItemInfo(e.bag, e.slot)
+    return info and info.itemID == e.itemID
+end
+
+local function LoadForPost(e)
+    if not auctionOpen then Print("open the Auction House first.") return end
+    if not SameItem(e) then ns.Refresh() return end
+    if not (AuctionHouseFrame and AuctionHouseFrame.SetPostItem and ItemLocation) then
+        Print("couldn't reach the Post screen - right-click the item in your bags instead.")
+        return
+    end
+    local ok, err = pcall(AuctionHouseFrame.SetPostItem, AuctionHouseFrame, ItemLocation:CreateFromBagAndSlot(e.bag, e.slot))
+    if not ok then
+        TW.Log("ERROR", "bags post: %s", tostring(err))
+        Print("couldn't load it - right-click the item in your bags instead.")
+        return
+    end
+    posting = e
+    C_Timer.After(0.2, ns.Refresh)
+end
+
+-- The first item on the Auction tab (the one in the Post screen is locked, so it's not listed).
+local function LoadNext()
+    local e = Scan().auction[1]
+    if e then LoadForPost(e)
+    else posting = nil; Print("nothing left to post."); ns.Refresh() end
+end
+
+-- After a post the item leaves its bag slot: load the next one.
+local function CheckPosted()
+    if not posting or not auctionOpen or StillThere(posting) then return end
+    TW.Log("BAGS", "posted %s x%d", posting.name, posting.count)
+    posting = nil
+    if Opt("autoNext") then C_Timer.After(0.5, function() TW.Guard("bags next", LoadNext) end) end
+end
+
+local function ToggleHide(e)
+    db.noAuction[e.itemID] = e.name
+    Print(e.link .. " won't be listed on the Auction tab (/tw bags unhide to bring it back).")
+    ns.Refresh()
+end
+
 local function AskDelete(e)
     StaticPopup_Show("TIPPWORKS_BAGS_DELETE", e.link, e.why, e)
 end
@@ -248,7 +337,9 @@ local function Row(i)
     b:SetScript("OnClick", function(self, btn)
         local e = self.entry
         if not e then return end
-        if btn == "RightButton" or db.tab == "kept" then ToggleKeep(e)
+        if db.tab == "auction" then
+            if btn == "RightButton" then ToggleHide(e) else LoadForPost(e) end
+        elseif btn == "RightButton" or db.tab == "kept" then ToggleKeep(e)
         elseif db.tab == "delete" then AskDelete(e)
         else ToggleKeep(e) end
     end)
@@ -259,7 +350,8 @@ local function Row(i)
         GameTooltip:SetBagItem(e.bag, e.slot)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("TippWorks: " .. e.why, 1, 0.82, 0, true)
-        GameTooltip:AddLine(db.tab == "delete" and "Left-click: delete (asks first)  |  Right-click: keep it"
+        GameTooltip:AddLine(db.tab == "auction" and "Click: load it into Post  |  Right-click: don't list it"
+            or db.tab == "delete" and "Left-click: delete (asks first)  |  Right-click: keep it"
             or db.tab == "kept" and "Click: let it be sold again" or "Click: keep it (never sell)", 0.6, 0.6, 0.6)
         GameTooltip:Show()
     end)
@@ -280,12 +372,24 @@ function ns.Refresh()
         local b = rows[i] or Row(i)
         b.entry = e
         b.left:SetText(e.link .. (e.count > 1 and (" x" .. e.count) or "") .. "  |cff888888" .. e.why .. "|r")
-        b.right:SetText(db.tab == "delete" and "|cffff6060delete|r" or (e.price > 0 and Money(e.price) or ""))
+        if db.tab == "auction" then
+            local loaded = posting and posting.bag == e.bag and posting.slot == e.slot
+            b.right:SetText(loaded and "|cff33ff33in Post|r" or e.ilvl and ("ilvl " .. e.ilvl) or "")
+        else
+            b.right:SetText(db.tab == "delete" and "|cffff6060delete|r" or (e.price > 0 and Money(e.price) or ""))
+        end
         b:Show()
     end
     for i = n + 1, #rows do rows[i]:Hide(); rows[i].entry = nil end
     local footer
-    if db.tab == "sell" then
+    win.post:SetShown(db.tab == "auction" and auctionOpen and n > 0)
+    if db.tab == "auction" then
+        win.sell:Hide()
+        footer = n == 0 and "|cff888888Nothing unbound to post.|r"
+            or not auctionOpen and "|cff888888Open the Auction House to post these.|r"
+            or (Opt("autoNext") and "|cff888888Click one, then Post. The next loads by itself.|r"
+                or "|cff888888Click one to load it into Post.|r")
+    elseif db.tab == "sell" then
         footer = n == 0 and "|cff888888Nothing to sell with your current rules (/tw bags rules).|r"
             or ("%d item%s, %s%s"):format(n, n == 1 and "" or "s", Money(total),
                 merchantOpen and "" or "  |cff888888- open a vendor to sell|r")
@@ -297,7 +401,7 @@ function ns.Refresh()
             or (n == 0 and "|cff888888Nothing held back.|r" or "|cff888888Matched a rule but held back. Click to change.|r")
     end
     win.footer:SetText(footer)
-    win:SetHeight(-win.top + math.max(n, 1) * ROW_H + 40 + (merchantOpen and db.tab == "sell" and 24 or 0))
+    win:SetHeight(-win.top + math.max(n, 1) * ROW_H + 40 + ((win.sell:IsShown() or win.post:IsShown()) and 24 or 0))
 end
 
 local function CreateWindow()
@@ -306,6 +410,7 @@ local function CreateWindow()
             { key = "sell", label = "Sell", title = "Bag Manager - sell" },
             { key = "delete", label = "Delete", title = "Bag Manager - can't sell" },
             { key = "kept", label = "Kept", title = "Bag Manager - held back" },
+            { key = "auction", label = "Auction", title = "Bag Manager - Auction House" },
         } })
     win.footer = win:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     win.footer:SetPoint("BOTTOMLEFT", 12, 10)
@@ -316,8 +421,14 @@ local function CreateWindow()
     win.sell:SetPoint("BOTTOMRIGHT", -10, 8)
     win.sell:SetText("Sell")
     win.sell:SetScript("OnClick", Sell)
+    win.post = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
+    win.post:SetSize(90, 22)
+    win.post:SetPoint("BOTTOMRIGHT", -10, 8)
+    win.post:SetText("Load next")
+    win.post:SetScript("OnClick", function() TW.Guard("bags next", LoadNext) end)
+    win.post:Hide()
     win:SetScript("OnShow", function() ns.Refresh() end)
-    win:SelectTab(db.tab == "delete" and "delete" or db.tab == "kept" and "kept" or "sell")
+    win:SelectTab(win.tabs[db.tab] and db.tab or "sell")
 end
 
 ---------------------------------------------------------------------------
@@ -334,6 +445,8 @@ local RULES = {
     { "transmog", "protectTransmog", "Keep gear whose appearance you haven't collected" },
     { "tradeable", "protectTradeable", "Keep unbound blue and epic gear (Auction House)" },
     { "auto", "autoSell", "Sell at the vendor without asking" },
+    { "next", "autoNext", "Auction House: after you post, load the next item" },
+    { "mats", "auctionMats", "Auction tab: list crafting materials too" },
 }
 
 local function ShowRules()
@@ -350,6 +463,13 @@ local function Command(rest)
     if sub == "" or sub == "show" then Toggle() return end
     if sub == "sell" then Sell() return end
     if sub == "rules" then ShowRules() return end
+    if sub == "auction" or sub == "ah" then db.tab = "auction"; win:SelectTab("auction"); win:Show() return end
+    if sub == "unhide" then
+        wipe(db.noAuction)
+        Print("every item is back on the Auction tab.")
+        ns.Refresh()
+        return
+    end
     if sub == "gap" then
         local n = tonumber(arg)
         if not n or n < 1 then Print("usage: /tw bags gap 20") return end
@@ -397,6 +517,9 @@ module = TW.Register({
         { "delete", "turn on/off offering to delete matching items that can't be sold" },
         { "transmog | tradeable", "turn a protection on/off" },
         { "auto", "turn on/off selling at the vendor without asking" },
+        { "auction", "show the Auction tab (opens by itself at the Auction House)" },
+        { "next | mats", "Auction House: load the next item after a post / list materials too" },
+        { "unhide", "bring back items you right-clicked off the Auction tab" },
         { "gap <number>", "how far below your item level counts as low (default 20)" },
         { "keep <item>", "never sell this item (shift-click it into the command); again to undo" },
     },
@@ -421,6 +544,37 @@ local function AddSettings()
     end
 end
 
+-- Other addons that sell at the vendor: two sellers at once fight over the same items.
+local OTHER_SELLERS = { "CrapAway", "Scrap", "Peddler", "AutoVendor", "Vendor", "SellJunk" }
+
+StaticPopupDialogs["TIPPWORKS_BAGS_OTHER"] = {
+    text = "%s is also loaded, and it sells at the vendor too. Two addons selling at once can fight over the same items.\n\nDisable %s? (Your UI reloads.)",
+    button1 = "Disable it", button2 = "Keep both",
+    OnAccept = function(_, name)
+        C_AddOns.DisableAddOn(name)
+        TW.Log("BAGS", "disabled %s", name)
+        ReloadUI()
+    end,
+    OnCancel = function(_, name, reason)
+        if reason ~= "clicked" then return end
+        db.allowOther[name] = true
+        Print("ok - no more warnings about " .. name .. ".")
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+}
+
+local function CheckOtherSellers()
+    if not (C_AddOns and C_AddOns.IsAddOnLoaded) then return end
+    for _, name in ipairs(OTHER_SELLERS) do
+        if Safe(C_AddOns.IsAddOnLoaded, name) and not db.allowOther[name] then
+            TW.Log("BAGS", "%s is also loaded - it sells at the vendor too", name)
+            Print(("|cffff6060warning:|r %s is also loaded and sells at the vendor too. Turn one of them off."):format(name))
+            StaticPopup_Show("TIPPWORKS_BAGS_OTHER", name, name, name)
+            return
+        end
+    end
+end
+
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("ADDON_LOADED")
 ev:SetScript("OnEvent", function(self, event, ...)
@@ -430,6 +584,8 @@ ev:SetScript("OnEvent", function(self, event, ...)
         TippWorksBagsDB = TippWorksBagsDB or {}
         db = TippWorksBagsDB
         db.keep = db.keep or {}
+        db.noAuction = db.noAuction or {}
+        db.allowOther = db.allowOther or {}
         db.tab = db.tab or "sell"
         TW.Log("INFO", "TippWorks-Bags v%s loaded", ns.VERSION)
         CreateWindow()
@@ -437,6 +593,13 @@ ev:SetScript("OnEvent", function(self, event, ...)
         self:RegisterEvent("MERCHANT_SHOW")
         self:RegisterEvent("MERCHANT_CLOSED")
         self:RegisterEvent("BAG_UPDATE_DELAYED")
+        self:RegisterEvent("AUCTION_HOUSE_SHOW")
+        self:RegisterEvent("AUCTION_HOUSE_CLOSED")
+        self:RegisterEvent("PLAYER_LOGIN")
+        return
+    end
+    if event == "PLAYER_LOGIN" then
+        C_Timer.After(5, function() TW.Guard("bags other sellers", CheckOtherSellers) end)
         return
     end
     if event == "MERCHANT_SHOW" then
@@ -450,7 +613,17 @@ ev:SetScript("OnEvent", function(self, event, ...)
     elseif event == "MERCHANT_CLOSED" then
         merchantOpen = false
         if win:IsShown() and db.tab == "sell" then win:Hide() end
+    elseif event == "AUCTION_HOUSE_SHOW" then
+        auctionOpen = true
+        TW.Guard("bags auction", function()
+            if #Scan().auction == 0 then return end
+            db.tab = "auction"; win:SelectTab("auction"); win:Show()
+        end)
+    elseif event == "AUCTION_HOUSE_CLOSED" then
+        auctionOpen, posting = false, nil
+        if win:IsShown() and db.tab == "auction" then win:Hide() end
     elseif event == "BAG_UPDATE_DELAYED" and not selling then
+        TW.Guard("bags posted", CheckPosted)
         TW.Guard("bags refresh", ns.Refresh)
     end
 end)
