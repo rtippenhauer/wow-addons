@@ -12,9 +12,12 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.3.0"
+ns.VERSION = "1.3.1"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
+
+-- Popups name the addon: they appear in the middle of the screen with no other hint where they came from.
+local POPUP_HEADER = "|cff" .. TW.COLOR .. "Tippenhauer Works|r - Bag Manager\n\n"
 
 local MAX_SELL = 12 -- the vendor's buyback tab holds the last 12 items: keep every sale recoverable
 local SELL_DELAY = 0.2
@@ -307,7 +310,7 @@ local function Sell()
 end
 
 StaticPopupDialogs["TIPPWORKS_BAGS_DELETE"] = {
-    text = "Delete %s?\n|cff888888(%s - it can't be sold)|r",
+    text = POPUP_HEADER .. "Delete %s?\n|cff888888(%s - it can't be sold)|r",
     button1 = DELETE or "Delete", button2 = CANCEL or "Cancel",
     OnAccept = function(_, e)
         if not SameItem(e) then Print("that item moved - not deleted.") return end
@@ -627,7 +630,7 @@ end
 local OTHER_SELLERS = { "CrapAway", "Scrap", "Peddler", "AutoVendor", "Vendor", "SellJunk" }
 
 StaticPopupDialogs["TIPPWORKS_BAGS_OTHER"] = {
-    text = "%s is also loaded, and it sells at the vendor too. Two addons selling at once can fight over the same items.\n\nDisable %s? (Your UI reloads.)",
+    text = POPUP_HEADER .. "%s is also loaded, and it sells at the vendor too. Two addons selling at once can fight over the same items.\n\nDisable %s? (Your UI reloads.)",
     button1 = "Disable it", button2 = "Keep both",
     OnAccept = function(_, name)
         C_AddOns.DisableAddOn(name)
