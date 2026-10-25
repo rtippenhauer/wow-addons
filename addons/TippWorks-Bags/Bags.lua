@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.3.2"
+ns.VERSION = "1.4.0"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -28,7 +28,7 @@ local WIDTH, ROW_H = 380, 18
 
 -- Defaults: junk and finished-quest items on; the gear rules are opt-in.
 local DEFAULTS = {
-    junk = true, lowLevel = false, wrongArmor = false, quest = true, offerDelete = true,
+    junk = true, lowLevel = false, wrongArmor = false, quest = true, pets = true, offerDelete = true,
     protectTransmog = true, protectTradeable = true, autoSell = false, ilvlGap = 20,
     autoNext = true, auctionMats = false, protectValue = true,
 }
@@ -66,6 +66,23 @@ local function AuctionKind(classID, subclassID, quality)
     if classID == 15 and subclassID == 2 then return "pet" end
     if classID == 15 and subclassID == 5 then return "mount" end
     if classID == 7 and Opt("auctionMats") then return "material" end
+end
+
+-- Pets: how many of a species you have and the most you can learn (usually 3, unique pets 1).
+local function PetCount(speciesID)
+    if not speciesID or not (C_PetJournal and C_PetJournal.GetNumCollectedInfo) then return nil end
+    local ok, have, limit = pcall(C_PetJournal.GetNumCollectedInfo, speciesID)
+    if ok and have and limit then return have, limit end
+end
+local function PetSpecies(itemID)
+    if not (C_PetJournal and C_PetJournal.GetPetInfoByItemID) then return nil end
+    local r = { pcall(C_PetJournal.GetPetInfoByItemID, itemID) }
+    return r[1] and r[14] or nil -- 13th return value: speciesID
+end
+local function PetNote(have, limit)
+    if not have then return "" end
+    if have == 0 then return " - |cffff9933not collected|r" end
+    return (" - you have %d/%d"):format(have, limit)
 end
 
 local function ItemLevel(link)
@@ -181,7 +198,19 @@ local function Scan()
                 local name, _, quality, _, _, _, _, _, equipLoc, _, price, classID, subclassID, bindType = C_Item.GetItemInfo(link)
                 -- Tradeable = not bound to you and not warbound/account-bound (the bag API calls those unbound).
                 local tradeable = info and not info.isBound and not NO_TRADE_BIND[bindType or 0]
-                if name then
+                local species = tonumber(link:match("|Hbattlepet:(%d+)"))
+                if species then
+                    -- A caged battle pet: always tradeable, so it's an Auction tab item.
+                    local hideKey = "pet:" .. species
+                    if not db.noAuction[hideKey] and Postable(bag, slot) then
+                        local have, limit = PetCount(species)
+                        local prices = Prices(link)
+                        out.auction[#out.auction + 1] = { bag = bag, slot = slot, itemID = info.itemID, link = link,
+                            name = link:match("%[(.-)%]") or "battle pet", count = 1, price = 0, quality = info.quality or 1,
+                            hideKey = hideKey, why = "caged pet" .. PetNote(have, limit),
+                            market = prices.market, priceNote = prices.market and PriceNote(prices) }
+                    end
+                elseif name then
                     local e = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
                         count = info.stackCount or 1, price = (price or 0) * (info.stackCount or 1) }
                     local gear = classID == ARMOR_CLASS or classID == WEAPON_CLASS
@@ -206,6 +235,11 @@ local function Scan()
                             why = "quest already done"
                         end
                     end
+                    local petHave, petLimit
+                    if classID == 15 and subclassID == 2 then petHave, petLimit = PetCount(PetSpecies(info.itemID)) end
+                    if not why and Opt("pets") and petHave and petLimit > 0 and petHave >= petLimit then
+                        why = ("pet - you have %d/%d"):format(petHave, petLimit)
+                    end
                     -- Why it must stay (wins over every rule).
                     local keep
                     local prices = quality and quality >= 1 and Prices(link) or {}
@@ -215,6 +249,8 @@ local function Scan()
                         elseif quality and quality >= 5 then keep = "legendary or better"
                         elseif C_Container.GetContainerItemEquipmentSetInfo and C_Container.GetContainerItemEquipmentSetInfo(bag, slot) then
                             keep = "in an equipment set"
+                        elseif petHave and tradeable then
+                            keep = "could go on the Auction House"
                         elseif gear and Opt("protectTransmog") and UncollectedAppearance(link) then
                             keep = "appearance not collected"
                         elseif gear and Opt("protectTradeable") and tradeable and quality and quality >= 3 then
@@ -246,6 +282,7 @@ local function Scan()
                             count = e.count, price = e.price, quality = quality, why = kind,
                             market = market and market * e.count, priceNote = market and PriceNote(prices),
                             de = gear and prices.de }
+                        if kind == "pet" then a.why = kind .. PetNote(petHave, petLimit) end
                         if kind == "unbound gear" then
                             a.ilvl = ItemLevel(link)
                             if a.ilvl then a.why = kind .. " " .. a.ilvl end
@@ -381,7 +418,7 @@ local function CheckPosted()
 end
 
 local function ToggleHide(e)
-    db.noAuction[e.itemID] = e.name
+    db.noAuction[e.hideKey or e.itemID] = e.name
     Print(e.link .. " won't be listed on the Auction tab (/tw bags unhide to bring it back).")
     ns.Refresh()
 end
@@ -528,6 +565,7 @@ local RULES = {
     { "low", "lowLevel", "Sell gear well below the item level you wear" },
     { "armor", "wrongArmor", "Sell armor that isn't your type (cloth, leather, mail, plate)" },
     { "quest", "quest", "Sell items for quests you've already done" },
+    { "pets", "pets", "Sell pets you can't learn any more (bound ones; tradeable ones go to the Auction tab)" },
     { "delete", "offerDelete", "Offer to delete matching items that can't be sold" },
     { "transmog", "protectTransmog", "Keep gear whose appearance you haven't collected" },
     { "tradeable", "protectTradeable", "Keep unbound blue and epic gear (Auction House)" },
@@ -622,7 +660,7 @@ module = TW.Register({
         { "", "show/hide the Bag Manager (opens by itself at a vendor when there's something to sell)" },
         { "sell", "sell everything on the Sell list (at a vendor)" },
         { "rules", "show which rules are on" },
-        { "junk | low | armor | quest", "turn a selling rule on/off" },
+        { "junk | low | armor | quest | pets", "turn a selling rule on/off" },
         { "delete", "turn on/off offering to delete matching items that can't be sold" },
         { "transmog | tradeable | value", "turn a protection on/off (value = TSM or Auctionator price)" },
         { "auto", "turn on/off selling at the vendor without asking" },

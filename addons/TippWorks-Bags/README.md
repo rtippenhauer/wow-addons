@@ -11,6 +11,7 @@ opens with a **Sell** list and a total; click **Sell**. Turn on `auto` to sell w
 | Low item level | off | Gear 20+ item levels below the lowest item you wear in that slot (`/tw bags gap <n>` to change) |
 | Not your armor type | off | Cloth, leather, mail or plate you can't wear (head, shoulders, chest, waist, legs, feet, wrists, hands) |
 | Finished quests | on | Items for quests you've already done |
+| Pets you can't learn | on | Pets you already have the most of (usually 3/3). Bound ones are sold (or deleted if the vendor won't take them); tradeable ones go to the **Auction** tab instead |
 | Delete what can't be sold | on | Matching items with no vendor price go to the **Delete** tab: click one, confirm, gone |
 
 ## Always kept
@@ -30,7 +31,7 @@ Settings: Options > AddOns > Tippenhauer Works > Bag Manager.
 ## Auction House
 
 When you open the Auction House, the **Auction** tab lists what could be posted: unbound green-or-better gear,
-recipes, gems, enhancements, pets and mounts (`/tw bags mats` adds crafting materials). Click one and it goes
+recipes, gems, enhancements, pets (with how many you have, e.g. "you have 3/3"), caged battle pets and mounts (`/tw bags mats` adds crafting materials). Click one and it goes
 into Blizzard's Post screen with the usual suggested price; click **Post**, and the next item loads by itself.
 **Load next** starts from the top. Right-click an item to leave it off the list (`/tw bags unhide` brings them back).
 Gear you haven't collected the appearance of is marked, in case you'd rather learn it.
@@ -54,7 +55,7 @@ disable it. **Keep both** stops the warning for that addon.
 | `/tw bags` | Show/hide the Bag Manager |
 | `/tw bags sell` | Sell the Sell list (at a vendor) |
 | `/tw bags rules` | Show which rules are on |
-| `/tw bags junk` / `low` / `armor` / `quest` | Turn a selling rule on/off |
+| `/tw bags junk` / `low` / `armor` / `quest` / `pets` | Turn a selling rule on/off |
 | `/tw bags delete` | Turn on/off offering to delete items that can't be sold |
 | `/tw bags transmog` / `tradeable` / `value` | Turn a protection on/off (`value` uses TSM or Auctionator prices) |
 | `/tw bags auto` | Sell at the vendor without asking |
