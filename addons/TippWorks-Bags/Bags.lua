@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.4.0"
+ns.VERSION = "1.4.1"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -236,7 +236,8 @@ local function Scan()
                         end
                     end
                     local petHave, petLimit
-                    if classID == 15 and subclassID == 2 then petHave, petLimit = PetCount(PetSpecies(info.itemID)) end
+                    -- Any miscellaneous item can teach a pet (older ones aren't always filed as Companion Pets).
+                    if classID == 15 then petHave, petLimit = PetCount(PetSpecies(info.itemID)) end
                     if not why and Opt("pets") and petHave and petLimit > 0 and petHave >= petLimit then
                         why = ("pet - you have %d/%d"):format(petHave, petLimit)
                     end
@@ -276,7 +277,7 @@ local function Scan()
                     -- Could go on the Auction House (anything not headed for the vendor).
                     local kind = (not why or keep) and tradeable and quality and quality >= 1
                         and not db.noAuction[info.itemID]
-                        and (AuctionKind(classID, subclassID, quality) or (keep and market and "worth more at auction"))
+                        and ((petHave and "pet") or AuctionKind(classID, subclassID, quality) or (keep and market and "worth more at auction"))
                     if kind and Postable(bag, slot) then
                         local a = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
                             count = e.count, price = e.price, quality = quality, why = kind,
@@ -590,6 +591,39 @@ local function Command(rest)
     if sub == "sell" then Sell() return end
     if sub == "rules" then ShowRules() return end
     if sub == "auction" or sub == "ah" then db.tab = "auction"; win:SelectTab("auction"); win:Show() return end
+    if sub == "why" then
+        -- Everything Bags sees about one item (also in /tw log), to explain where it's listed or why it isn't.
+        local id = tonumber(arg:match("item:(%d+)") or arg)
+        if not id then Print("usage: /tw bags why <shift-click an item>") return end
+        local function Out(fmt, ...) local s = fmt:format(...); Print(s); TW.Log("BAGS", "why: %s", s) end
+        local found
+        for bag = 0, (NUM_TOTAL_BAG_FRAMES or NUM_BAG_SLOTS or 4) do
+            for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                if not found and info and info.itemID == id then found = { bag = bag, slot = slot, info = info } end
+            end
+        end
+        if not found then Out("item %d isn't in your bags.", id) return end
+        local info = found.info
+        local name, _, quality, _, _, _, _, _, equipLoc, _, price, classID, subclassID, bindType = C_Item.GetItemInfo(info.hyperlink)
+        Out("%s: quality %s, class %s/%s, bind type %s, bound to you %s, vendor price %s%s, locked %s",
+            tostring(name), tostring(quality), tostring(classID), tostring(subclassID), tostring(bindType),
+            tostring(info.isBound), tostring(price), info.hasNoValue and " (no value)" or "", tostring(info.isLocked))
+        local species = PetSpecies(id)
+        if species then
+            local have, limit = PetCount(species)
+            Out("teaches pet species %d: you have %s of %s", species, tostring(have), tostring(limit))
+        end
+        local scan = Scan()
+        local where
+        for _, list in ipairs({ "sell", "delete", "kept", "auction" }) do
+            for _, e in ipairs(scan[list]) do
+                if not where and e.bag == found.bag and e.slot == found.slot then where = list .. " tab: " .. e.why end
+            end
+        end
+        Out("listed on: %s", where or ("nothing" .. (Opt("offerDelete") and "" or " (offering to delete is off)")))
+        return
+    end
     if sub == "prices" then
         -- What TSM and Auctionator actually return for the first items on the Auction tab (also in /tw log).
         local function Out(fmt, ...) local s = fmt:format(...); Print(s); TW.Log("BAGS", "prices: %s", s) end
@@ -667,6 +701,7 @@ module = TW.Register({
         { "auction", "show the Auction tab (opens by itself at the Auction House)" },
         { "next | mats", "Auction House: load the next item after a post / list materials too" },
         { "unhide", "bring back items you right-clicked off the Auction tab" },
+        { "why <item>", "explain what Bags sees about an item and where it is listed (shift-click it in)" },
         { "prices", "show what TSM and Auctionator return for the first items on the Auction tab" },
         { "gap <number>", "how far below your item level counts as low (default 20)" },
         { "keep <item>", "never sell this item (shift-click it into the command); again to undo" },
