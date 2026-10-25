@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.12"
+ns.VERSION = "1.0.13"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -186,6 +186,7 @@ end
 -- Party members' curiosities from before we know which copy of the delve we're in (held until
 -- our own scan finds one), and party members whose list turned out to be from another copy.
 local pending, staleFrom = {}, {}
+local prunedRun -- the list already checked for curiosities from another copy this session
 
 local function NewRun(why)
     run = { inst = select(8, GetInstanceInfo()), items = {}, order = {}, compacted = true }
@@ -319,16 +320,26 @@ end
 
 -- A party member's list turned out to be from another copy of the delve: remove what only they
 -- told us about, and their pickups.
+-- who = nil: only drop entries whose object GUID belongs to another copy of the delve.
 local function DropFrom(who)
     local order, dropped = {}, 0
     for _, k in ipairs(run.order) do
         local it = run.items[k]
-        if it.via == who then run.items[k] = nil; dropped = dropped + 1
-        else it.looted[who] = nil; order[#order + 1] = k end
+        local zone = ZoneOf(k)
+        if (who and it.via == who) or (zone and run.zone and zone ~= run.zone) then
+            run.items[k] = nil; dropped = dropped + 1
+        else
+            if who then it.looted[who] = nil end
+            order[#order + 1] = k
+        end
     end
     run.order = order
     for k, v in pairs(run.alias or {}) do if not run.items[v] then run.alias[k] = nil end end
-    ns.Log("CURIO", "%s's curiosities are from another run of this delve - ignoring them (%d removed)", who, dropped)
+    if who then
+        ns.Log("CURIO", "%s's curiosities are from another run of this delve - ignoring them (%d removed)", who, dropped)
+    elseif dropped > 0 then
+        ns.Log("CURIO", "removed %d curiosities from another run of this delve", dropped)
+    end
     if ns.RefreshCurios then ns.RefreshCurios() end
 end
 
@@ -448,6 +459,11 @@ local function Scan()
             end
             local first = not run.zone
             run.zone = zone
+            if prunedRun ~= run then
+                -- Once per list and session: drop anything saved or synced earlier from another copy.
+                prunedRun = run
+                DropFrom(nil)
+            end
             if first and ns.ReplayPendingCurios then ns.ReplayPendingCurios() end
             break
         end
