@@ -14,7 +14,7 @@ the hard-won in-game facts (secret values, secure buttons in combat, delve quirk
 
 ## Addons
 TippWorks-Core (shared `TippWorks` global: log, Guard/Safe, module registry + `/tw`, launcher, `TW.CreateWindow`,
-delve travel in Atlas.lua), -Calls, -Curios, -Vault, -Rares. Rares keeps CoiledRareTracker's SavedVariables names
+delve travel in Atlas.lua), -Calls, -Curios, -Vault, -Rares, -Labyrinth, -Bags. Rares keeps CoiledRareTracker's SavedVariables names
 (`CoiledRareTrackerDB`, `CoiledRareTrackerAccountDB`) and the target button's global name (key binding); the
 other addons copy their old settings from those once (`db.migrated`), so they list TippWorks-Rares and
 CoiledRareTracker in `## OptionalDeps`.
