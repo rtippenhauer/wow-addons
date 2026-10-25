@@ -58,6 +58,18 @@ right-clicking the item, so it waits until you're out of combat). Decor in the b
 **Bank** tab: click it (or **Move all**) to move it to your bags, then add it from the Decor tab. Right-click keeps an
 item in your bags. `/tw bags housing` turns this off.
 
+## Opening bags and caches
+
+The **Open** tab lists what in your bags can be opened for loot: bags, caches, satchels, unlocked lockboxes. Click
+one to open it. WoW needs one click per item, so for a stack you click the row again. Locked lockboxes stay off the
+list until a rogue or a key unlocks them. It waits until you're out of combat, and warns you when your bags are full
+so no loot is lost. Right-click keeps an item off the list. `/tw bags containers` turns this off.
+
+## Tabs
+
+The tabs show how many items each one has; a grey tab has nothing to do. The Bank tab's count shows while the bank
+is open.
+
 ## Other selling addons
 
 If CrapAway (or Scrap, Peddler, AutoVendor, Vendor, SellJunk) is also loaded, Bags warns at login and offers to
@@ -78,6 +90,8 @@ disable it. **Keep both** stops the warning for that addon.
 | `/tw bags bank` | Show the Bank tab |
 | `/tw bags decor` | Show the Decor tab |
 | `/tw bags housing` | Turn on/off listing housing decor |
+| `/tw bags open` | Show the Open tab |
+| `/tw bags containers` | Turn on/off listing things to open |
 | `/tw bags next` | Turn on/off loading the next item after you post |
 | `/tw bags mats` | Turn on/off listing crafting materials on the Auction tab |
 | `/tw bags unhide` | Bring back items you right-clicked off the Auction tab |

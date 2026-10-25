@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.7.0"
+ns.VERSION = "1.8.0"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -24,11 +24,11 @@ local SELL_DELAY = 0.2
 
 local db
 local win, rows = nil, {}
-local WIDTH, ROW_H = 500, 18 -- six tabs need 498
+local WIDTH, ROW_H = 500, 18
 
 -- Defaults: junk and finished-quest items on; the gear rules are opt-in.
 local DEFAULTS = {
-    junk = true, lowLevel = false, wrongArmor = false, quest = true, pets = true, known = true, decor = true, offerDelete = true,
+    junk = true, lowLevel = false, wrongArmor = false, quest = true, pets = true, known = true, decor = true, open = true, offerDelete = true,
     protectTransmog = true, protectTradeable = true, autoSell = false, ilvlGap = 20,
     autoNext = true, auctionMats = false, protectValue = true,
 }
@@ -86,6 +86,18 @@ local function IsDecor(itemID, classID)
         if ok and v then return true end
     end
     return Enum and Enum.ItemClass and Enum.ItemClass.Housing ~= nil and classID == Enum.ItemClass.Housing
+end
+
+-- Lockboxes say "Locked" on their tooltip until a rogue or a key opens them.
+local function LockedBox(bag, slot)
+    if not (C_TooltipInfo and C_TooltipInfo.GetBagItem and type(LOCKED) == "string") then return false end
+    local ok, data = pcall(C_TooltipInfo.GetBagItem, bag, slot)
+    if not ok or type(data) ~= "table" or type(data.lines) ~= "table" then return false end
+    for _, line in ipairs(data.lines) do
+        local t = line.leftText
+        if type(t) == "string" and not (issecretvalue and issecretvalue(t)) and t == LOCKED then return true end
+    end
+    return false
 end
 
 -- Mounts and toys you already know: returns "mount" / "toy" when this item teaches one you have.
@@ -270,7 +282,7 @@ end
 -- Returns { sell = {...}, delete = {...}, kept = {...}, auction = {...} }; each entry is
 -- { bag, slot, itemID, link, name, count, price, why }. bank = true scans the bank instead of the bags.
 local function Scan(bank)
-    local out = { sell = {}, delete = {}, kept = {}, auction = {}, decor = {} }
+    local out = { sell = {}, delete = {}, kept = {}, auction = {}, decor = {}, open = {} }
     local _, class = UnitClass("player")
     local myArmor = ARMOR_TYPE[class or ""]
     for _, bag in ipairs(bank and BankContainers() or BagContainers()) do
@@ -293,6 +305,12 @@ local function Scan(bank)
                             name = link:match("%[(.-)%]") or "battle pet", count = 1, price = 0, quality = info.quality or 1,
                             hideKey = hideKey, why = "caged pet" .. PetNote(have, limit),
                             market = prices.market, priceNote = prices.market and PriceNote(prices) }
+                    end
+                elseif name and info.hasLoot and Opt("open") and not bank then
+                    -- Bags, caches and the like: the Open tab opens them one click at a time.
+                    if not db.keep[info.itemID] and not LockedBox(bag, slot) then
+                        out.open[#out.open + 1] = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
+                            count = info.stackCount or 1, price = 0, why = "open it for loot" }
                     end
                 elseif name and Opt("decor") and IsDecor(info.itemID, classID) then
                     -- Housing decor goes to the Decor tab: one click adds it to your housing storage.
@@ -622,7 +640,9 @@ end
 ---------------------------------------------------------------------------
 -- Window
 ---------------------------------------------------------------------------
--- Using an item needs a secure button: each Decor row gets one on top. They live on UIParent and
+-- Tabs whose rows use the item (a secure click).
+local USE_TAB = { decor = true, open = true }
+-- Using an item needs a secure button: each Decor and Open row gets one on top. They live on UIParent and
 -- are only placed and shown out of combat, so the window itself can still move and hide in combat.
 local secureButtons, secureOf = {}, {}
 local function HideSecure()
@@ -643,7 +663,8 @@ local function SecureFor(row)
         local e = row.entry
         if not e then return end
         if btn == "RightButton" then ToggleKeep(e) return end
-        TW.Log("BAGS", "added %s to housing storage", e.name)
+        if db.tab == "open" then TW.Log("BAGS", "opened %s", e.name)
+        else TW.Log("BAGS", "added %s to housing storage", e.name) end
         C_Timer.After(0.5, ns.Refresh)
     end)
     s:Hide()
@@ -681,8 +702,8 @@ local function Row(i)
         if not e then return end
         if db.tab == "auction" then
             if btn == "RightButton" then ToggleHide(e) else LoadForPost(e) end
-        elseif db.tab == "decor" then
-            if btn == "RightButton" then ToggleKeep(e) else Print("after combat: click it again to add it to your housing storage.") end
+        elseif USE_TAB[db.tab] then
+            if btn == "RightButton" then ToggleKeep(e) else Print("after combat: click it again.") end
         elseif db.tab == "bank" and btn ~= "RightButton" then
             if e.action == "delete" then MoveThenDelete(e)
             elseif MoveToBags(e) then C_Timer.After(0.3, ns.Refresh) end
@@ -700,6 +721,7 @@ local function Row(i)
         if e.market then GameTooltip:AddLine("Auction price: " .. Money(e.market) .. " (" .. e.priceNote .. ")", 1, 1, 1) end
         if e.de then GameTooltip:AddLine("Disenchant: ~" .. Money(e.de), 0.64, 0.21, 0.93) end
         GameTooltip:AddLine(db.tab == "decor" and "Click: add it to your housing storage  |  Right-click: keep it in your bags"
+            or db.tab == "open" and "Click: open it  |  Right-click: don't list it"
             or db.tab == "bank" and (e.action == "delete" and "Click: move to your bags and delete (asks first)  |  Right-click: keep it"
                 or e.action == "decor" and "Click: move to your bags (then add it from the Decor tab)  |  Right-click: keep it"
                 or "Click: move to your bags (sell at a vendor)  |  Right-click: keep it")
@@ -715,11 +737,14 @@ end
 
 function ns.Refresh()
     if not win or not win:IsShown() then return end
+    local scan = Scan()
     local list
     if db.tab == "bank" then list = bankOpen and BankList() or {}
-    else
-        local scan = Scan()
-        list = scan[db.tab] or scan.sell
+    else list = scan[db.tab] or scan.sell end
+    -- Counts on the tabs (items to act on; the bank only while it's open).
+    if win.SetTabCount then
+        for _, k in ipairs({ "sell", "delete", "auction", "decor", "open" }) do win:SetTabCount(k, #scan[k]) end
+        win:SetTabCount("bank", bankOpen and #(db.tab == "bank" and list or BankList()) or nil)
     end
     local total = 0
     for _, e in ipairs(list) do total = total + e.price end
@@ -732,6 +757,8 @@ function ns.Refresh()
         if db.tab == "auction" then
             local loaded = posting and posting.bag == e.bag and posting.slot == e.slot
             b.right:SetText(loaded and "|cff33ff33in Post|r" or e.market and Money(e.market) or "")
+        elseif db.tab == "open" then
+            b.right:SetText("|cff33ff99open|r")
         elseif db.tab == "bank" then
             b.right:SetText(e.action == "delete" and "|cffff6060to bags, delete|r"
                 or e.action == "decor" and "|cff33ff99to bags|r, decor" or ("|cff33ff99to bags|r " .. Money(e.price)))
@@ -739,7 +766,7 @@ function ns.Refresh()
             b.right:SetText(db.tab == "delete" and "|cffff6060delete|r" or (e.price > 0 and Money(e.price) or ""))
         end
         b:Show()
-        if db.tab == "decor" then PlaceSecure(b, e)
+        if USE_TAB[db.tab] then PlaceSecure(b, e)
         elseif secureOf[b] and not InCombatLockdown() then secureOf[b]:Hide(); secureOf[b]:ClearAllPoints() end
     end
     for i = n + 1, #rows do
@@ -753,7 +780,13 @@ function ns.Refresh()
     local toMove = 0
     if db.tab == "bank" then for _, e in ipairs(list) do if e.action == "move" then toMove = toMove + 1 end end end
     win.move:SetShown(db.tab == "bank" and bankOpen and n > 0)
-    if db.tab == "decor" then
+    if db.tab == "open" then
+        win.sell:Hide()
+        footer = n == 0 and "|cff888888Nothing to open.|r"
+            or FreeBagSlots() == 0 and "|cffff6060Your bags are full - make room before opening, or the loot is lost.|r"
+            or InCombatLockdown() and "|cff888888After combat: click one to open it.|r"
+            or "|cff888888Click one to open it (once per item).|r"
+    elseif db.tab == "decor" then
         win.sell:Hide()
         footer = n == 0 and "|cff888888No housing decor in your bags.|r"
             or InCombatLockdown() and "|cff888888After combat: click one to add it to your housing storage.|r"
@@ -788,13 +821,14 @@ end
 
 local function CreateWindow()
     win = TW.CreateWindow({ name = "TippWorksBagsFrame", title = "Bag Manager", version = ns.VERSION,
-        width = WIDTH, db = db, onTab = function() ns.Refresh() end, tabs = {
+        width = WIDTH, db = db, flatTabs = true, onTab = function() ns.Refresh() end, tabs = {
             { key = "sell", label = "Sell", title = "Bag Manager - sell" },
             { key = "delete", label = "Delete", title = "Bag Manager - can't sell" },
             { key = "kept", label = "Kept", title = "Bag Manager - held back" },
             { key = "auction", label = "Auction", title = "Bag Manager - Auction House" },
             { key = "bank", label = "Bank", title = "Bag Manager - bank" },
             { key = "decor", label = "Decor", title = "Bag Manager - housing decor" },
+            { key = "open", label = "Open", title = "Bag Manager - open for loot" },
         } })
     win.footer = win:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     win.footer:SetPoint("BOTTOMLEFT", 12, 10)
@@ -834,6 +868,7 @@ local RULES = {
     { "quest", "quest", "Sell items for quests you've already done" },
     { "pets", "pets", "Sell pets you can't learn any more (bound ones; tradeable ones go to the Auction tab)" },
     { "known", "known", "Sell mounts and toys you already know (bound ones; tradeable ones go to the Auction tab)" },
+    { "containers", "open", "List bags and caches you can open (Open tab)" },
     { "housing", "decor", "List housing decor to add to your housing storage (Decor tab; from the bank too)" },
     { "delete", "offerDelete", "Offer to delete matching items that can't be sold" },
     { "transmog", "protectTransmog", "Keep gear whose appearance you haven't collected" },
@@ -861,6 +896,7 @@ local function Command(rest)
     if sub == "auction" or sub == "ah" then db.tab = "auction"; win:SelectTab("auction"); win:Show() return end
     if sub == "bank" then db.tab = "bank"; win:SelectTab("bank"); win:Show() return end
     if sub == "decor" then db.tab = "decor"; win:SelectTab("decor"); win:Show() return end
+    if sub == "open" then db.tab = "open"; win:SelectTab("open"); win:Show() return end
     if sub == "why" then
         -- Everything Bags sees about one item (also in /tw log), to explain where it's listed or why it isn't.
         local id = tonumber(arg:match("item:(%d+)") or arg)
@@ -886,7 +922,8 @@ local function Command(rest)
         end
         local scan = Scan()
         local where
-        for _, list in ipairs({ "sell", "delete", "kept", "auction" }) do
+        Out("opens for loot: %s", tostring(info.hasLoot))
+        for _, list in ipairs({ "sell", "delete", "kept", "auction", "decor", "open" }) do
             for _, e in ipairs(scan[list]) do
                 if not where and e.bag == found.bag and e.slot == found.slot then where = list .. " tab: " .. e.why end
             end
@@ -953,7 +990,7 @@ local function Summary(tt)
     local scan = Scan()
     local total = 0
     for _, e in ipairs(scan.sell) do total = total + e.price end
-    tt:AddLine(("Bags: %d to sell (%s), %d to delete"):format(#scan.sell, Money(total), #scan.delete), 1, 1, 1)
+    tt:AddLine(("Bags: %d to sell (%s), %d to delete, %d to open"):format(#scan.sell, Money(total), #scan.delete, #scan.open), 1, 1, 1)
 end
 
 module = TW.Register({
@@ -972,6 +1009,8 @@ module = TW.Register({
         { "bank", "show the Bank tab: what in the bank to sell or delete (opens by itself at the bank)" },
         { "decor", "show the Decor tab: housing decor to add to your housing storage" },
         { "housing", "turn on/off listing housing decor" },
+        { "open", "show the Open tab: bags, caches and the like to open for loot" },
+        { "containers", "turn on/off listing things to open" },
         { "next | mats", "Auction House: load the next item after a post / list materials too" },
         { "unhide", "bring back items you right-clicked off the Auction tab" },
         { "why <item>", "explain what Bags sees about an item and where it is listed (shift-click it in)" },
@@ -1079,7 +1118,7 @@ ev:SetScript("OnEvent", function(self, event, ...)
         end
         return
     end
-    -- Combat: the secure Decor buttons are pulled off the window just before lockdown starts.
+    -- Combat: the secure Decor/Open buttons are pulled off the window just before lockdown starts.
     if event == "PLAYER_REGEN_DISABLED" then HideSecure() return end
     if event == "PLAYER_REGEN_ENABLED" then TW.Guard("bags refresh", ns.Refresh) return end
     if event == "PLAYER_LOGIN" then
