@@ -19,6 +19,8 @@ opens with a **Sell** list and a total; click **Sell**. Turn on `auto` to sell w
 - Gear whose **appearance isn't collected** yet (anyone in the warband).
 - Items in an **equipment set**, and anything legendary or better.
 - **Unbound blue and epic gear**, which could go on the Auction House (setting).
+- With **TradeSkillMaster** loaded: anything TSM says is worth at least 3x its vendor price (and 1 gold or more) on the
+  Auction House (`/tw bags value`).
 
 At most **12 items** (greys don't count) are sold per vendor visit: the buyback tab holds the last 12, so every
 sale can be bought back. Everything sold or deleted is in `/tw log`.
@@ -32,6 +34,10 @@ recipes, gems, enhancements, pets and mounts (`/tw bags mats` adds crafting mate
 into Blizzard's Post screen with the usual suggested price; click **Post**, and the next item loads by itself.
 **Load next** starts from the top. Right-click an item to leave it off the list (`/tw bags unhide` brings them back).
 Gear you haven't collected the appearance of is marked, in case you'd rather learn it.
+
+**With TradeSkillMaster:** each item shows its TSM market value and the list is sorted most valuable first.
+TSM replaces the Auction House window, so drag the items into your TSM group and use TSM's Post Scan
+(or switch TSM back to the WoW window and the click-to-load works as above).
 
 ## Other selling addons
 
@@ -47,7 +53,7 @@ disable it. **Keep both** stops the warning for that addon.
 | `/tw bags rules` | Show which rules are on |
 | `/tw bags junk` / `low` / `armor` / `quest` | Turn a selling rule on/off |
 | `/tw bags delete` | Turn on/off offering to delete items that can't be sold |
-| `/tw bags transmog` / `tradeable` | Turn a protection on/off |
+| `/tw bags transmog` / `tradeable` / `value` | Turn a protection on/off (`value` uses TSM prices) |
 | `/tw bags auto` | Sell at the vendor without asking |
 | `/tw bags auction` | Show the Auction tab |
 | `/tw bags next` | Turn on/off loading the next item after you post |

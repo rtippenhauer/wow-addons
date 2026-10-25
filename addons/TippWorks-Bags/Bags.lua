@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.1.0"
+ns.VERSION = "1.2.0"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -27,7 +27,7 @@ local WIDTH, ROW_H = 380, 18
 local DEFAULTS = {
     junk = true, lowLevel = false, wrongArmor = false, quest = true, offerDelete = true,
     protectTransmog = true, protectTradeable = true, autoSell = false, ilvlGap = 20,
-    autoNext = true, auctionMats = false,
+    autoNext = true, auctionMats = false, protectValue = true,
 }
 local function Opt(k) if db[k] == nil then return DEFAULTS[k] end return db[k] end
 
@@ -105,6 +105,23 @@ local function Postable(bag, slot)
     return not ok or valid ~= false
 end
 
+local function Money(c) return GetCoinTextureString and GetCoinTextureString(c) or (tostring(math.floor(c / 10000)) .. "g") end
+
+-- TradeSkillMaster's public API (TSM_API): market value per item, from the TSM desktop app's data.
+-- Returns nil when TSM isn't loaded or has no price for the item.
+local TSM_PRICE = "first(dbmarket, dbregionmarketavg)"
+local function TSMLoaded() return TSM_API and TSM_API.GetCustomPriceValue and TSM_API.ToItemString and true or false end
+local function TSMValue(link)
+    if not TSMLoaded() then return nil end
+    local ok, itemString = pcall(TSM_API.ToItemString, link)
+    if not ok or not itemString then return nil end
+    local ok2, v = pcall(TSM_API.GetCustomPriceValue, TSM_PRICE, itemString)
+    v = ok2 and tonumber(v)
+    return v and v > 0 and v or nil
+end
+-- Worth keeping for the Auction House: at least this many times the vendor price, and at least 1 gold.
+local VALUE_FACTOR, VALUE_MIN = 3, 10000
+
 -- Returns { sell = {...}, delete = {...}, kept = {...}, auction = {...} }; each entry is
 -- { bag, slot, itemID, link, name, count, price, why }.
 local function Scan()
@@ -143,7 +160,8 @@ local function Scan()
                         end
                     end
                     -- Why it must stay (wins over every rule).
-                    local keep
+                    local keep, market
+                    if not info.isBound and quality and quality >= 1 then market = TSMValue(link) end
                     if why then
                         if db.keep[info.itemID] then keep = "you keep it"
                         elseif quality and quality >= 5 then keep = "legendary or better"
@@ -153,6 +171,8 @@ local function Scan()
                             keep = "appearance not collected"
                         elseif gear and Opt("protectTradeable") and not info.isBound and quality and quality >= 3 then
                             keep = "not bound - could go on the Auction House"
+                        elseif market and Opt("protectValue") and market >= VALUE_MIN and market >= VALUE_FACTOR * (price or 0) then
+                            keep = "worth " .. Money(market) .. " on the Auction House (TSM)"
                         end
                     end
                     if why and keep then
@@ -167,14 +187,17 @@ local function Scan()
                     end
                     -- Could go on the Auction House (anything not headed for the vendor).
                     local kind = (not why or keep) and not info.isBound and quality and quality >= 1
-                        and not db.noAuction[info.itemID] and AuctionKind(classID, subclassID, quality)
+                        and not db.noAuction[info.itemID]
+                        and (AuctionKind(classID, subclassID, quality) or (keep and market and "worth more at auction"))
                     if kind and Postable(bag, slot) then
                         local a = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
-                            count = e.count, price = e.price, quality = quality, why = kind }
+                            count = e.count, price = e.price, quality = quality, why = kind,
+                            market = market and market * e.count }
                         if kind == "unbound gear" then
                             a.ilvl = ItemLevel(link)
+                            if a.ilvl then a.why = kind .. " " .. a.ilvl end
                             if Opt("protectTransmog") and UncollectedAppearance(link) then
-                                a.why = kind .. " - |cffff9933appearance not collected|r"
+                                a.why = a.why .. " - |cffff9933appearance not collected|r"
                             end
                         end
                         out.auction[#out.auction + 1] = a
@@ -188,15 +211,15 @@ local function Scan()
         if (a.why == "junk") ~= (b.why == "junk") then return a.why == "junk" end
         return a.price > b.price
     end)
+    -- Most valuable first when TSM knows the price; otherwise by quality and item level.
     table.sort(out.auction, function(a, b)
+        if (a.market or 0) ~= (b.market or 0) then return (a.market or 0) > (b.market or 0) end
         if a.quality ~= b.quality then return a.quality > b.quality end
         if (a.ilvl or 0) ~= (b.ilvl or 0) then return (a.ilvl or 0) > (b.ilvl or 0) end
         return a.name < b.name
     end)
     return out
 end
-
-local function Money(c) return GetCoinTextureString and GetCoinTextureString(c) or (tostring(math.floor(c / 10000)) .. "g") end
 
 ---------------------------------------------------------------------------
 -- Selling and deleting
@@ -268,6 +291,12 @@ end
 local function LoadForPost(e)
     if not auctionOpen then Print("open the Auction House first.") return end
     if not SameItem(e) then ns.Refresh() return end
+    -- TSM replaces Blizzard's Auction House window (unless you switch back to it).
+    if TSMLoaded() and not (AuctionHouseFrame and AuctionHouseFrame:IsShown()) then
+        Print("TSM is running the Auction House: drag " .. e.link .. " into your TSM group and post it there.")
+        ns.Refresh()
+        return
+    end
     if not (AuctionHouseFrame and AuctionHouseFrame.SetPostItem and ItemLocation) then
         Print("couldn't reach the Post screen - right-click the item in your bags instead.")
         return
@@ -374,7 +403,7 @@ function ns.Refresh()
         b.left:SetText(e.link .. (e.count > 1 and (" x" .. e.count) or "") .. "  |cff888888" .. e.why .. "|r")
         if db.tab == "auction" then
             local loaded = posting and posting.bag == e.bag and posting.slot == e.slot
-            b.right:SetText(loaded and "|cff33ff33in Post|r" or e.ilvl and ("ilvl " .. e.ilvl) or "")
+            b.right:SetText(loaded and "|cff33ff33in Post|r" or e.market and Money(e.market) or "")
         else
             b.right:SetText(db.tab == "delete" and "|cffff6060delete|r" or (e.price > 0 and Money(e.price) or ""))
         end
@@ -382,11 +411,13 @@ function ns.Refresh()
     end
     for i = n + 1, #rows do rows[i]:Hide(); rows[i].entry = nil end
     local footer
-    win.post:SetShown(db.tab == "auction" and auctionOpen and n > 0)
+    local tsmUI = TSMLoaded() and not (AuctionHouseFrame and AuctionHouseFrame:IsShown())
+    win.post:SetShown(db.tab == "auction" and auctionOpen and n > 0 and not tsmUI)
     if db.tab == "auction" then
         win.sell:Hide()
         footer = n == 0 and "|cff888888Nothing unbound to post.|r"
             or not auctionOpen and "|cff888888Open the Auction House to post these.|r"
+            or tsmUI and "|cff888888Drag these into your TSM group, then Post Scan.|r"
             or (Opt("autoNext") and "|cff888888Click one, then Post. The next loads by itself.|r"
                 or "|cff888888Click one to load it into Post.|r")
     elseif db.tab == "sell" then
@@ -444,6 +475,7 @@ local RULES = {
     { "delete", "offerDelete", "Offer to delete matching items that can't be sold" },
     { "transmog", "protectTransmog", "Keep gear whose appearance you haven't collected" },
     { "tradeable", "protectTradeable", "Keep unbound blue and epic gear (Auction House)" },
+    { "value", "protectValue", "Keep items TSM says are worth 3x their vendor price (1g+) on the Auction House" },
     { "auto", "autoSell", "Sell at the vendor without asking" },
     { "next", "autoNext", "Auction House: after you post, load the next item" },
     { "mats", "auctionMats", "Auction tab: list crafting materials too" },
@@ -515,7 +547,7 @@ module = TW.Register({
         { "rules", "show which rules are on" },
         { "junk | low | armor | quest", "turn a selling rule on/off" },
         { "delete", "turn on/off offering to delete matching items that can't be sold" },
-        { "transmog | tradeable", "turn a protection on/off" },
+        { "transmog | tradeable | value", "turn a protection on/off (value = TSM price)" },
         { "auto", "turn on/off selling at the vendor without asking" },
         { "auction", "show the Auction tab (opens by itself at the Auction House)" },
         { "next | mats", "Auction House: load the next item after a post / list materials too" },
@@ -619,6 +651,8 @@ ev:SetScript("OnEvent", function(self, event, ...)
             if #Scan().auction == 0 then return end
             db.tab = "auction"; win:SelectTab("auction"); win:Show()
         end)
+        -- TSM swaps in its own window right after this event: look again once it has.
+        C_Timer.After(0.5, function() TW.Guard("bags refresh", ns.Refresh) end)
     elseif event == "AUCTION_HOUSE_CLOSED" then
         auctionOpen, posting = false, nil
         if win:IsShown() and db.tab == "auction" then win:Hide() end
