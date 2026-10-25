@@ -43,6 +43,12 @@ is marked *(disenchant ~price)*.
 TSM replaces the Auction House window, so drag the items into your TSM group and use TSM's Post Scan
 (or switch TSM back to the WoW window and the click-to-load works as above).
 
+## Bank
+
+When you open your bank or warband bank and something there matches your rules, the **Bank** tab opens. Vendors only
+buy from your bags, so items to sell say *to bags*: click one (or **Move all**) and it moves to your bags for the next
+vendor. Items that can't be sold are deleted right there (asks first). Right-click to keep an item.
+
 ## Other selling addons
 
 If CrapAway (or Scrap, Peddler, AutoVendor, Vendor, SellJunk) is also loaded, Bags warns at login and offers to
@@ -60,6 +66,7 @@ disable it. **Keep both** stops the warning for that addon.
 | `/tw bags transmog` / `tradeable` / `value` | Turn a protection on/off (`value` uses TSM or Auctionator prices) |
 | `/tw bags auto` | Sell at the vendor without asking |
 | `/tw bags auction` | Show the Auction tab |
+| `/tw bags bank` | Show the Bank tab |
 | `/tw bags next` | Turn on/off loading the next item after you post |
 | `/tw bags mats` | Turn on/off listing crafting materials on the Auction tab |
 | `/tw bags unhide` | Bring back items you right-clicked off the Auction tab |

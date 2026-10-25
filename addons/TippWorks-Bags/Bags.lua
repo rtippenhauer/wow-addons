@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.4.1"
+ns.VERSION = "1.5.0"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -24,7 +24,7 @@ local SELL_DELAY = 0.2
 
 local db
 local win, rows = nil, {}
-local WIDTH, ROW_H = 380, 18
+local WIDTH, ROW_H = 430, 18 -- five tabs need 416
 
 -- Defaults: junk and finished-quest items on; the gear rules are opt-in.
 local DEFAULTS = {
@@ -184,13 +184,71 @@ end
 -- Worth keeping for the Auction House: at least this many times the vendor price, and at least 1 gold.
 local VALUE_FACTOR, VALUE_MIN = 3, 10000
 
+-- "Warbound until equipped" items report neither isBound nor a warbound bind type, so ask the
+-- item itself, then fall back to the binding line on its tooltip. Cached per item link.
+local NO_TRADE_LINES
+local untradeableCache = {}
+local function WarboundOrBound(bag, slot, link)
+    if untradeableCache[link] ~= nil then return untradeableCache[link] end
+    local result = false
+    if ItemLocation then
+        local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
+        for _, fn in ipairs({ "IsItemBindToAccountUntilEquip", "IsBoundToAccountUntilEquip" }) do
+            if C_Item[fn] then
+                local ok, v = pcall(C_Item[fn], loc)
+                if ok and v == true then result = true end
+            end
+        end
+    end
+    if not result and C_TooltipInfo and C_TooltipInfo.GetBagItem then
+        if not NO_TRADE_LINES then
+            NO_TRADE_LINES = {}
+            for _, g in ipairs({ "ITEM_ACCOUNTBOUND_UNTIL_EQUIP", "ITEM_BIND_TO_ACCOUNT_UNTIL_EQUIP", "ITEM_ACCOUNTBOUND",
+                "ITEM_BNETACCOUNTBOUND", "ITEM_BIND_TO_ACCOUNT", "ITEM_BIND_TO_BNETACCOUNT" }) do
+                if type(_G[g]) == "string" then NO_TRADE_LINES[_G[g]] = true end
+            end
+        end
+        local ok, data = pcall(C_TooltipInfo.GetBagItem, bag, slot)
+        if ok and type(data) == "table" and type(data.lines) == "table" then
+            for _, line in ipairs(data.lines) do
+                local t = line.leftText
+                if type(t) == "string" and not (issecretvalue and issecretvalue(t)) and NO_TRADE_LINES[t] then
+                    result = true
+                    break
+                end
+            end
+        end
+    end
+    untradeableCache[link] = result
+    return result
+end
+
+-- Containers: your bags, and (while the bank is open) the bank and warband bank tabs.
+local function BagContainers()
+    local t = {}
+    for bag = 0, (NUM_TOTAL_BAG_FRAMES or NUM_BAG_SLOTS or 4) do t[#t + 1] = bag end
+    return t
+end
+local function BankContainers()
+    local seen, t = {}, {}
+    for key, id in pairs(Enum and Enum.BagIndex or {}) do
+        if type(id) == "number" and not seen[id] and (key == "Bank" or key == "Reagentbank" or key:find("^BankBag_")
+            or key:find("^CharacterBankTab_") or key:find("^AccountBankTab_")) then
+            seen[id] = true
+            t[#t + 1] = id
+        end
+    end
+    table.sort(t)
+    return t
+end
+
 -- Returns { sell = {...}, delete = {...}, kept = {...}, auction = {...} }; each entry is
--- { bag, slot, itemID, link, name, count, price, why }.
-local function Scan()
+-- { bag, slot, itemID, link, name, count, price, why }. bank = true scans the bank instead of the bags.
+local function Scan(bank)
     local out = { sell = {}, delete = {}, kept = {}, auction = {} }
     local _, class = UnitClass("player")
     local myArmor = ARMOR_TYPE[class or ""]
-    for bag = 0, (NUM_TOTAL_BAG_FRAMES or NUM_BAG_SLOTS or 4) do
+    for _, bag in ipairs(bank and BankContainers() or BagContainers()) do
         for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.hyperlink and not info.isLocked then
@@ -198,6 +256,7 @@ local function Scan()
                 local name, _, quality, _, _, _, _, _, equipLoc, _, price, classID, subclassID, bindType = C_Item.GetItemInfo(link)
                 -- Tradeable = not bound to you and not warbound/account-bound (the bag API calls those unbound).
                 local tradeable = info and not info.isBound and not NO_TRADE_BIND[bindType or 0]
+                    and not (quality and quality >= 1 and WarboundOrBound(bag, slot, link))
                 local species = tonumber(link:match("|Hbattlepet:(%d+)"))
                 if species then
                     -- A caged battle pet: always tradeable, so it's an Auction tab item.
@@ -428,6 +487,65 @@ local function AskDelete(e)
     StaticPopup_Show("TIPPWORKS_BAGS_DELETE", e.link, e.why, e)
 end
 
+---------------------------------------------------------------------------
+-- Bank: what in the bank and warband bank should go. Vendors only buy from
+-- your bags, so those move to your bags; what can't be sold is deleted there.
+---------------------------------------------------------------------------
+local bankOpen, moving = false, false
+
+local function BankList()
+    local scan = Scan(true)
+    local list = {}
+    for _, e in ipairs(scan.sell) do e.action = "move"; list[#list + 1] = e end
+    for _, e in ipairs(scan.delete) do e.action = "delete"; list[#list + 1] = e end
+    return list
+end
+
+-- Free slots in your regular bags (not the reagent bag).
+local function FreeBagSlots()
+    local n = 0
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        local free, family = C_Container.GetContainerNumFreeSlots(bag)
+        if (family or 0) == 0 then n = n + (free or 0) end
+    end
+    return n
+end
+
+-- With the bank open, using a bank item moves it to your bags.
+local function MoveToBags(e)
+    if not bankOpen then Print("open your bank first.") return false end
+    if not SameItem(e) then return false end
+    if FreeBagSlots() == 0 then Print("your bags are full.") return false end
+    C_Container.UseContainerItem(e.bag, e.slot)
+    TW.Log("BAGS", "moved %s x%d from the bank to sell (%s)", e.name, e.count, e.why)
+    return true
+end
+
+local function MoveAll()
+    if moving then return end
+    local list = {}
+    for _, e in ipairs(BankList()) do if e.action == "move" then list[#list + 1] = e end end
+    if #list == 0 then Print("nothing in the bank to move.") return end
+    moving = true
+    local i, moved = 0, 0
+    local function Next()
+        i = i + 1
+        local e = list[i]
+        if not e or not bankOpen or FreeBagSlots() == 0 then
+            moving = false
+            if moved > 0 then
+                Print(("moved %d item%s to your bags - sell them at the next vendor."):format(moved, moved == 1 and "" or "s"))
+            end
+            if e and bankOpen then Print("your bags are full - sell, then move the rest.") end
+            ns.Refresh()
+            return
+        end
+        if MoveToBags(e) then moved = moved + 1 end
+        C_Timer.After(SELL_DELAY, Next)
+    end
+    Next()
+end
+
 local function ToggleKeep(e)
     if db.keep[e.itemID] then
         db.keep[e.itemID] = nil
@@ -460,6 +578,9 @@ local function Row(i)
         if not e then return end
         if db.tab == "auction" then
             if btn == "RightButton" then ToggleHide(e) else LoadForPost(e) end
+        elseif db.tab == "bank" and btn ~= "RightButton" then
+            if e.action == "delete" then AskDelete(e)
+            elseif MoveToBags(e) then C_Timer.After(0.3, ns.Refresh) end
         elseif btn == "RightButton" or db.tab == "kept" then ToggleKeep(e)
         elseif db.tab == "delete" then AskDelete(e)
         else ToggleKeep(e) end
@@ -468,12 +589,14 @@ local function Row(i)
         local e = self.entry
         if not e then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetBagItem(e.bag, e.slot)
+        pcall(GameTooltip.SetBagItem, GameTooltip, e.bag, e.slot)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("TippWorks: " .. e.why, 1, 0.82, 0, true)
         if e.market then GameTooltip:AddLine("Auction price: " .. Money(e.market) .. " (" .. e.priceNote .. ")", 1, 1, 1) end
         if e.de then GameTooltip:AddLine("Disenchant: ~" .. Money(e.de), 0.64, 0.21, 0.93) end
-        GameTooltip:AddLine(db.tab == "auction" and "Click: load it into Post  |  Right-click: don't list it"
+        GameTooltip:AddLine(db.tab == "bank" and (e.action == "delete" and "Click: delete (asks first)  |  Right-click: keep it"
+                or "Click: move to your bags (sell at a vendor)  |  Right-click: keep it")
+            or db.tab == "auction" and "Click: load it into Post  |  Right-click: don't list it"
             or db.tab == "delete" and "Left-click: delete (asks first)  |  Right-click: keep it"
             or db.tab == "kept" and "Click: let it be sold again" or "Click: keep it (never sell)", 0.6, 0.6, 0.6)
         GameTooltip:Show()
@@ -485,8 +608,12 @@ end
 
 function ns.Refresh()
     if not win or not win:IsShown() then return end
-    local scan = Scan()
-    local list = scan[db.tab] or scan.sell
+    local list
+    if db.tab == "bank" then list = bankOpen and BankList() or {}
+    else
+        local scan = Scan()
+        list = scan[db.tab] or scan.sell
+    end
     local total = 0
     for _, e in ipairs(list) do total = total + e.price end
     local n = 0
@@ -498,6 +625,8 @@ function ns.Refresh()
         if db.tab == "auction" then
             local loaded = posting and posting.bag == e.bag and posting.slot == e.slot
             b.right:SetText(loaded and "|cff33ff33in Post|r" or e.market and Money(e.market) or "")
+        elseif db.tab == "bank" then
+            b.right:SetText(e.action == "delete" and "|cffff6060delete|r" or ("|cff33ff99to bags|r " .. Money(e.price)))
         else
             b.right:SetText(db.tab == "delete" and "|cffff6060delete|r" or (e.price > 0 and Money(e.price) or ""))
         end
@@ -507,7 +636,16 @@ function ns.Refresh()
     local footer
     local tsmUI = TSMLoaded() and not (AuctionHouseFrame and AuctionHouseFrame:IsShown())
     win.post:SetShown(db.tab == "auction" and auctionOpen and n > 0 and not tsmUI)
-    if db.tab == "auction" then
+    local toMove = 0
+    if db.tab == "bank" then for _, e in ipairs(list) do if e.action == "move" then toMove = toMove + 1 end end end
+    win.move:SetShown(db.tab == "bank" and bankOpen and toMove > 0)
+    if db.tab == "bank" then
+        win.sell:Hide()
+        footer = not bankOpen and "|cff888888Open your bank or warband bank to check it.|r"
+            or n == 0 and "|cff888888Nothing in the bank to sell or delete.|r"
+            or ("|cff888888%d to move to your bags and sell, %d to delete.|r")
+                :format(toMove, n - toMove)
+    elseif db.tab == "auction" then
         win.sell:Hide()
         footer = n == 0 and "|cff888888Nothing unbound to post.|r"
             or not auctionOpen and "|cff888888Open the Auction House to post these.|r"
@@ -526,7 +664,7 @@ function ns.Refresh()
             or (n == 0 and "|cff888888Nothing held back.|r" or "|cff888888Matched a rule but held back. Click to change.|r")
     end
     win.footer:SetText(footer)
-    win:SetHeight(-win.top + math.max(n, 1) * ROW_H + 40 + ((win.sell:IsShown() or win.post:IsShown()) and 24 or 0))
+    win:SetHeight(-win.top + math.max(n, 1) * ROW_H + 40 + ((win.sell:IsShown() or win.post:IsShown() or win.move:IsShown()) and 24 or 0))
 end
 
 local function CreateWindow()
@@ -536,6 +674,7 @@ local function CreateWindow()
             { key = "delete", label = "Delete", title = "Bag Manager - can't sell" },
             { key = "kept", label = "Kept", title = "Bag Manager - held back" },
             { key = "auction", label = "Auction", title = "Bag Manager - Auction House" },
+            { key = "bank", label = "Bank", title = "Bag Manager - bank" },
         } })
     win.footer = win:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     win.footer:SetPoint("BOTTOMLEFT", 12, 10)
@@ -552,6 +691,12 @@ local function CreateWindow()
     win.post:SetText("Load next")
     win.post:SetScript("OnClick", function() TW.Guard("bags next", LoadNext) end)
     win.post:Hide()
+    win.move = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
+    win.move:SetSize(90, 22)
+    win.move:SetPoint("BOTTOMRIGHT", -10, 8)
+    win.move:SetText("Move all")
+    win.move:SetScript("OnClick", function() TW.Guard("bags move", MoveAll) end)
+    win.move:Hide()
     win:SetScript("OnShow", function() ns.Refresh() end)
     win:SelectTab(win.tabs[db.tab] and db.tab or "sell")
 end
@@ -591,6 +736,7 @@ local function Command(rest)
     if sub == "sell" then Sell() return end
     if sub == "rules" then ShowRules() return end
     if sub == "auction" or sub == "ah" then db.tab = "auction"; win:SelectTab("auction"); win:Show() return end
+    if sub == "bank" then db.tab = "bank"; win:SelectTab("bank"); win:Show() return end
     if sub == "why" then
         -- Everything Bags sees about one item (also in /tw log), to explain where it's listed or why it isn't.
         local id = tonumber(arg:match("item:(%d+)") or arg)
@@ -699,6 +845,7 @@ module = TW.Register({
         { "transmog | tradeable | value", "turn a protection on/off (value = TSM or Auctionator price)" },
         { "auto", "turn on/off selling at the vendor without asking" },
         { "auction", "show the Auction tab (opens by itself at the Auction House)" },
+        { "bank", "show the Bank tab: what in the bank to sell or delete (opens by itself at the bank)" },
         { "next | mats", "Auction House: load the next item after a post / list materials too" },
         { "unhide", "bring back items you right-clicked off the Auction tab" },
         { "why <item>", "explain what Bags sees about an item and where it is listed (shift-click it in)" },
@@ -779,6 +926,29 @@ ev:SetScript("OnEvent", function(self, event, ...)
         self:RegisterEvent("AUCTION_HOUSE_SHOW")
         self:RegisterEvent("AUCTION_HOUSE_CLOSED")
         self:RegisterEvent("PLAYER_LOGIN")
+        -- The bank: the old events and the interaction manager (whichever this client has).
+        for _, e in ipairs({ "BANKFRAME_OPENED", "BANKFRAME_CLOSED",
+            "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" }) do
+            pcall(self.RegisterEvent, self, e)
+        end
+        return
+    end
+    local P = Enum and Enum.PlayerInteractionType
+    local isBank = event == "BANKFRAME_OPENED" or event == "BANKFRAME_CLOSED"
+        or (P and (event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" or event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
+            and ((...) == P.Banker or (...) == P.AccountBanker or (...) == P.CharacterBanker))
+    if isBank then
+        local open = event == "BANKFRAME_OPENED" or event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW"
+        if open == bankOpen then return end
+        bankOpen = open
+        if open then
+            -- The bank's contents arrive a moment after it opens.
+            C_Timer.After(0.5, function() TW.Guard("bags bank", function()
+                if bankOpen and #BankList() > 0 then db.tab = "bank"; win:SelectTab("bank"); win:Show() end
+            end) end)
+        else
+            if win:IsShown() and db.tab == "bank" then win:Hide() end
+        end
         return
     end
     if event == "PLAYER_LOGIN" then
