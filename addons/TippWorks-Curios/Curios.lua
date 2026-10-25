@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.11"
+ns.VERSION = "1.0.12"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -183,10 +183,15 @@ local function ZoneOf(guid)
     return guid:match("^[^-]+%-%d+%-%d+%-%d+%-(%d+)%-")
 end
 
+-- Party members' curiosities from before we know which copy of the delve we're in (held until
+-- our own scan finds one), and party members whose list turned out to be from another copy.
+local pending, staleFrom = {}, {}
+
 local function NewRun(why)
     run = { inst = select(8, GetInstanceInfo()), items = {}, order = {}, compacted = true }
     db.curioRun = run
     answered = nil
+    wipe(pending); wipe(staleFrom)
     ns.Log("CURIO", "new curiosity list (%s)", why)
 end
 
@@ -196,6 +201,8 @@ local function StartRunIfNeeded(fresh)
     run = db.curioRun
     if fresh then
         NewRun("entered the delve")
+    elseif run and run.left then
+        NewRun("you left the delve since this list was made")
     elseif not run or run.inst ~= instMap or time() - (run.lastSeen or 0) > 1800 then
         run = { inst = instMap, items = {}, order = {}, compacted = true }
         db.curioRun = run
@@ -307,6 +314,21 @@ function ns.ResetCurioRun()
     if IsInInstance() then StartRunIfNeeded() end
     ns.Log("CURIO", "curiosity list cleared by hand")
     ns.Print("curiosity list cleared.")
+    if ns.RefreshCurios then ns.RefreshCurios() end
+end
+
+-- A party member's list turned out to be from another copy of the delve: remove what only they
+-- told us about, and their pickups.
+local function DropFrom(who)
+    local order, dropped = {}, 0
+    for _, k in ipairs(run.order) do
+        local it = run.items[k]
+        if it.via == who then run.items[k] = nil; dropped = dropped + 1
+        else it.looted[who] = nil; order[#order + 1] = k end
+    end
+    run.order = order
+    for k, v in pairs(run.alias or {}) do if not run.items[v] then run.alias[k] = nil end end
+    ns.Log("CURIO", "%s's curiosities are from another run of this delve - ignoring them (%d removed)", who, dropped)
     if ns.RefreshCurios then ns.RefreshCurios() end
 end
 
@@ -424,7 +446,9 @@ local function Scan()
                 NewRun("curiosities belong to a different copy of the delve")
                 changed = true
             end
+            local first = not run.zone
             run.zone = zone
+            if first and ns.ReplayPendingCurios then ns.ReplayPendingCurios() end
             break
         end
     end
@@ -433,6 +457,7 @@ local function Scan()
     local function Track(key, kind, name, pos, weak)
         local ownGuid = not weak and not key:find("@", 1, true)
         local it, new = AddItem(key, kind, name, map, pos.x, pos.y, ownGuid)
+        it.via = nil -- seen by this client, not only heard of from a party member
         if weak and it.key ~= key then
             seen[it.key] = true
             return
@@ -1111,6 +1136,14 @@ local function Enter(fresh)
     ns.RefreshCurios()
 end
 
+-- Left the delve: the next time in is a new run, even after a /reload.
+local function Leave()
+    if wasInDelve then ns.Log("CURIO", "left the delve") end
+    if run then run.left = true end
+    inDelve, wasInDelve = false, false
+    frame:Hide(); wipe(addonUsers); ClearArrow()
+end
+
 local lastAsk = 0
 local function OnAddonMessage(prefix, msg, _, sender)
     if prefix ~= PREFIX then return end
@@ -1137,6 +1170,7 @@ local function OnAddonMessage(prefix, msg, _, sender)
     end
     if tag == "R" then ns.RefreshCurios() return end
     if tag == "H" then
+        staleFrom[who] = nil -- they entered or reloaded: their list may be current now
         -- Answer with our own version so both sides show it, even after
         -- only one of you reloaded. A reply is never answered (no ping-pong).
         Broadcast("R|" .. ns.VERSION)
@@ -1153,12 +1187,31 @@ local function OnAddonMessage(prefix, msg, _, sender)
         return
     end
     if not run then return end -- pickups only mean something during a delve run
+    if staleFrom[who] then return end
     local zone = ZoneOf(key)
-    if zone and run.zone and zone ~= run.zone then return end -- from another delve copy
+    if zone and not run.zone then
+        -- We don't know our copy of the delve yet: hold it until our own scan finds a curiosity.
+        if #pending < 200 then pending[#pending + 1] = { prefix, msg, sender } end
+        return
+    end
+    if zone and zone ~= run.zone then
+        -- Their list is from another copy (e.g. the last run, if they didn't notice leaving):
+        -- ignore them and take back what they sent, until they enter or reload again.
+        staleFrom[who] = true
+        DropFrom(who)
+        return
+    end
     x, y, map = tonumber(x), tonumber(y), tonumber(map)
     if not (key and x and y and map) then return end
-    local it = AddItem(key, kind, name, map, x, y)
+    local it, new = AddItem(key, kind, name, map, x, y)
+    if new then it.via = who end
     if tag == "L" then MarkLooted(it, who, true) else ns.RefreshCurios() end
+end
+
+function ns.ReplayPendingCurios()
+    local list = pending
+    pending = {}
+    for _, p in ipairs(list) do ns.Guard("curio sync", OnAddonMessage, p[1], p[2], nil, p[3]) end
 end
 
 function ns.InitCurios()
@@ -1181,7 +1234,7 @@ function ns.InitCurios()
             lastPEWWasReload = isReload and true or false
             inDelve = IsDelve()
             if inDelve and not wasInDelve then Enter(not lastPEWWasReload)
-            elseif not inDelve and wasInDelve ~= false then frame:Hide(); wipe(addonUsers); ClearArrow() end
+            elseif not inDelve and wasInDelve ~= false then Leave() end
             wasInDelve = inDelve
         elseif event == "CHAT_MSG_ADDON" then
             OnAddonMessage(...)
@@ -1229,6 +1282,8 @@ function ns.InitCurios()
             inDelve, wasInDelve = true, true
             Enter(not lastPEWWasReload)
         end
+        -- Out of the instance without a loading screen we heard about: that's leaving too.
+        if inDelve and not IsInInstance() then Leave() end
         if not inDelve then return end
         run.lastSeen = time()
         ns.Guard("curio scan", Scan)

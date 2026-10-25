@@ -2,7 +2,7 @@
 ## Title: |cffe6a23cTippenhauer Works|r - Core
 ## Notes: Shared core for the Tippenhauer Works addons: /tw commands, activity log, minimap launcher.
 ## Author: rtippenhauer (Tippenhauer Works)
-## Version: 1.2.3
+## Version: 1.2.4
 ## X-Website: https://github.com/rtippenhauer/wow-addons
 ## Category: Tippenhauer Works
 ## Group: TippWorks-Core

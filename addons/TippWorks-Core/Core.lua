@@ -10,7 +10,7 @@ ns.TW = TW
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-TW.VERSION = "1.2.3"
+TW.VERSION = "1.2.4"
 TW.COLOR = "e6a23c"
 TW.WEBSITE = "https://github.com/rtippenhauer/wow-addons"
 
@@ -35,10 +35,13 @@ function TW.Safe(fn, ...)
     return a
 end
 
+-- Delves are "scenario" instances. IsDelveInProgress alone isn't enough: it stays true after you
+-- leave a delve (seen outside in Zul'Aman and inside Scarlet Monastery, Oct 2026).
 function TW.IsDelve()
-    if C_PartyInfo and C_PartyInfo.IsDelveInProgress and TW.Safe(C_PartyInfo.IsDelveInProgress) then return true end
     local _, instType, diff = GetInstanceInfo()
-    return instType == "scenario" and diff == 208
+    if instType ~= "scenario" then return false end
+    if diff == 208 then return true end
+    return C_PartyInfo and C_PartyInfo.IsDelveInProgress and TW.Safe(C_PartyInfo.IsDelveInProgress) and true or false
 end
 
 -- True for this addon family (and the CoiledRareTracker it replaces).
