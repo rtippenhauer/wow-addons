@@ -2,7 +2,7 @@
 ## Title: |cffe6a23cTippenhauer Works|r - Bags
 ## Notes: Bag manager: sells junk, low item level gear, armor that isn't your type and finished-quest items at the vendor; offers to delete what can't be sold. Keeps uncollected transmog.
 ## Author: rtippenhauer (Tippenhauer Works)
-## Version: 1.3.1
+## Version: 1.3.2
 ## X-Website: https://github.com/rtippenhauer/wow-addons
 ## Category: Tippenhauer Works
 ## Group: TippWorks-Core

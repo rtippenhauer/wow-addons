@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.3.1"
+ns.VERSION = "1.3.2"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -53,6 +53,10 @@ local SLOTS = {
     INVTYPE_WEAPONOFFHAND = { 17 }, INVTYPE_HOLDABLE = { 17 }, INVTYPE_SHIELD = { 17 },
     INVTYPE_RANGED = { 16 }, INVTYPE_RANGEDRIGHT = { 16 },
 }
+
+-- Bind types (Enum.ItemBind) that can never be traded: bind on pickup, quest, and the warbound /
+-- account-bound kinds (7 ToWoWAccount, 8 ToBnetAccount, 9 ToBnetAccountUntilEquipped).
+local NO_TRADE_BIND = { [1] = true, [4] = true, [7] = true, [8] = true, [9] = true }
 
 -- What can go on the Auction House besides unbound gear (item class -> label).
 local AUCTION_KIND = { [3] = "gem", [8] = "enhancement", [9] = "recipe", [16] = "glyph", [19] = "profession gear" }
@@ -174,7 +178,9 @@ local function Scan()
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.hyperlink and not info.isLocked then
                 local link = info.hyperlink
-                local name, _, quality, _, _, _, _, _, equipLoc, _, price, classID, subclassID = C_Item.GetItemInfo(link)
+                local name, _, quality, _, _, _, _, _, equipLoc, _, price, classID, subclassID, bindType = C_Item.GetItemInfo(link)
+                -- Tradeable = not bound to you and not warbound/account-bound (the bag API calls those unbound).
+                local tradeable = info and not info.isBound and not NO_TRADE_BIND[bindType or 0]
                 if name then
                     local e = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
                         count = info.stackCount or 1, price = (price or 0) * (info.stackCount or 1) }
@@ -203,7 +209,7 @@ local function Scan()
                     -- Why it must stay (wins over every rule).
                     local keep
                     local prices = quality and quality >= 1 and Prices(link) or {}
-                    local market = not info.isBound and prices.market or nil
+                    local market = tradeable and prices.market or nil
                     if why then
                         if db.keep[info.itemID] then keep = "you keep it"
                         elseif quality and quality >= 5 then keep = "legendary or better"
@@ -211,7 +217,7 @@ local function Scan()
                             keep = "in an equipment set"
                         elseif gear and Opt("protectTransmog") and UncollectedAppearance(link) then
                             keep = "appearance not collected"
-                        elseif gear and Opt("protectTradeable") and not info.isBound and quality and quality >= 3 then
+                        elseif gear and Opt("protectTradeable") and tradeable and quality and quality >= 3 then
                             keep = "not bound - could go on the Auction House"
                         elseif market and Opt("protectValue") and market >= VALUE_MIN and market >= VALUE_FACTOR * (price or 0) then
                             keep = "worth " .. Money(market) .. " on the Auction House (" .. PriceNote(prices) .. ")"
@@ -232,7 +238,7 @@ local function Scan()
                         out.sell[#out.sell + 1] = e
                     end
                     -- Could go on the Auction House (anything not headed for the vendor).
-                    local kind = (not why or keep) and not info.isBound and quality and quality >= 1
+                    local kind = (not why or keep) and tradeable and quality and quality >= 1
                         and not db.noAuction[info.itemID]
                         and (AuctionKind(classID, subclassID, quality) or (keep and market and "worth more at auction"))
                     if kind and Postable(bag, slot) then
@@ -546,6 +552,27 @@ local function Command(rest)
     if sub == "sell" then Sell() return end
     if sub == "rules" then ShowRules() return end
     if sub == "auction" or sub == "ah" then db.tab = "auction"; win:SelectTab("auction"); win:Show() return end
+    if sub == "prices" then
+        -- What TSM and Auctionator actually return for the first items on the Auction tab (also in /tw log).
+        local function Out(fmt, ...) local s = fmt:format(...); Print(s); TW.Log("BAGS", "prices: %s", s) end
+        Out("TSM %s, Auctionator %s", TSMLoaded() and "loaded" or "not loaded",
+            (Auctionator and Auctionator.API and Auctionator.API.v1) and "loaded" or "not loaded")
+        local list = Scan().auction
+        if #list == 0 then Out("nothing on the Auction tab to look up.") return end
+        for i = 1, math.min(5, #list) do
+            local e = list[i]
+            local tsm = "-"
+            if TSMLoaded() then
+                local ok, s = pcall(TSM_API.ToItemString, e.link)
+                local ok2, v, err = false, nil, nil
+                if ok and s then ok2, v, err = pcall(TSM_API.GetCustomPriceValue, TSM_PRICE, s) end
+                tsm = ("%s -> %s%s"):format(tostring(ok and s or "error: " .. tostring(s)),
+                    tostring(ok2 and v or "error"), err and (" (" .. tostring(err) .. ")") or "")
+            end
+            Out("%s: TSM %s, Auctionator %s", e.name, tsm, tostring(AuctionatorAPI("GetAuctionPriceByItemLink", e.link)))
+        end
+        return
+    end
     if sub == "unhide" then
         wipe(db.noAuction)
         Print("every item is back on the Auction tab.")
@@ -602,6 +629,7 @@ module = TW.Register({
         { "auction", "show the Auction tab (opens by itself at the Auction House)" },
         { "next | mats", "Auction House: load the next item after a post / list materials too" },
         { "unhide", "bring back items you right-clicked off the Auction tab" },
+        { "prices", "show what TSM and Auctionator return for the first items on the Auction tab" },
         { "gap <number>", "how far below your item level counts as low (default 20)" },
         { "keep <item>", "never sell this item (shift-click it into the command); again to undo" },
     },

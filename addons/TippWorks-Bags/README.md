@@ -62,6 +62,7 @@ disable it. **Keep both** stops the warning for that addon.
 | `/tw bags next` | Turn on/off loading the next item after you post |
 | `/tw bags mats` | Turn on/off listing crafting materials on the Auction tab |
 | `/tw bags unhide` | Bring back items you right-clicked off the Auction tab |
+| `/tw bags prices` | Show what TSM and Auctionator return for the first items on the Auction tab (for troubleshooting) |
 | `/tw bags gap <number>` | Item levels below yours that count as low (default 20) |
 | `/tw bags keep <item>` | Never sell this item; again to undo |
 
