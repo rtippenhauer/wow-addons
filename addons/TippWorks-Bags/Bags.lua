@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.6.0"
+ns.VERSION = "1.7.0"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -28,7 +28,7 @@ local WIDTH, ROW_H = 500, 18 -- six tabs need 498
 
 -- Defaults: junk and finished-quest items on; the gear rules are opt-in.
 local DEFAULTS = {
-    junk = true, lowLevel = false, wrongArmor = false, quest = true, pets = true, decor = true, offerDelete = true,
+    junk = true, lowLevel = false, wrongArmor = false, quest = true, pets = true, known = true, decor = true, offerDelete = true,
     protectTransmog = true, protectTradeable = true, autoSell = false, ilvlGap = 20,
     autoNext = true, auctionMats = false, protectValue = true,
 }
@@ -86,6 +86,22 @@ local function IsDecor(itemID, classID)
         if ok and v then return true end
     end
     return Enum and Enum.ItemClass and Enum.ItemClass.Housing ~= nil and classID == Enum.ItemClass.Housing
+end
+
+-- Mounts and toys you already know: returns "mount" / "toy" when this item teaches one you have.
+local function KnownKind(itemID)
+    if C_MountJournal and C_MountJournal.GetMountFromItem then
+        local ok, mountID = pcall(C_MountJournal.GetMountFromItem, itemID)
+        if ok and mountID and C_MountJournal.GetMountInfoByID then
+            local r = { pcall(C_MountJournal.GetMountInfoByID, mountID) }
+            if r[1] and r[12] == true then return "mount" end -- 11th return value: isCollected
+            return nil
+        end
+    end
+    if C_ToyBox and C_ToyBox.GetToyInfo and PlayerHasToy then
+        local ok, toyItem = pcall(C_ToyBox.GetToyInfo, itemID)
+        if ok and toyItem and PlayerHasToy(itemID) then return "toy" end
+    end
 end
 
 local function PetNote(have, limit)
@@ -315,6 +331,8 @@ local function Scan(bank)
                     if not why and Opt("pets") and petHave and petLimit > 0 and petHave >= petLimit then
                         why = ("pet - you have %d/%d"):format(petHave, petLimit)
                     end
+                    local known = not why and not gear and Opt("known") and KnownKind(info.itemID)
+                    if known then why = known .. " - you already know it" end
                     -- Why it must stay (wins over every rule).
                     local keep
                     local prices = quality and quality >= 1 and Prices(link) or {}
@@ -324,7 +342,7 @@ local function Scan(bank)
                         elseif quality and quality >= 5 then keep = "legendary or better"
                         elseif C_Container.GetContainerItemEquipmentSetInfo and C_Container.GetContainerItemEquipmentSetInfo(bag, slot) then
                             keep = "in an equipment set"
-                        elseif petHave and tradeable then
+                        elseif (petHave or known) and tradeable then
                             keep = "could go on the Auction House"
                         elseif gear and Opt("protectTransmog") and UncollectedAppearance(link) then
                             keep = "appearance not collected"
@@ -351,13 +369,14 @@ local function Scan(bank)
                     -- Could go on the Auction House (anything not headed for the vendor).
                     local kind = (not why or keep) and tradeable and quality and quality >= 1
                         and not db.noAuction[info.itemID]
-                        and ((petHave and "pet") or AuctionKind(classID, subclassID, quality) or (keep and market and "worth more at auction"))
+                        and ((petHave and "pet") or known or AuctionKind(classID, subclassID, quality) or (keep and market and "worth more at auction"))
                     if kind and Postable(bag, slot) then
                         local a = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
                             count = e.count, price = e.price, quality = quality, why = kind,
                             market = market and market * e.count, priceNote = market and PriceNote(prices),
                             de = gear and prices.de }
                         if kind == "pet" then a.why = kind .. PetNote(petHave, petLimit) end
+                        if known then a.why = known .. " - you already know it" end
                         if kind == "unbound gear" then
                             a.ilvl = ItemLevel(link)
                             if a.ilvl then a.why = kind .. " " .. a.ilvl end
@@ -814,6 +833,7 @@ local RULES = {
     { "armor", "wrongArmor", "Sell armor that isn't your type (cloth, leather, mail, plate)" },
     { "quest", "quest", "Sell items for quests you've already done" },
     { "pets", "pets", "Sell pets you can't learn any more (bound ones; tradeable ones go to the Auction tab)" },
+    { "known", "known", "Sell mounts and toys you already know (bound ones; tradeable ones go to the Auction tab)" },
     { "housing", "decor", "List housing decor to add to your housing storage (Decor tab; from the bank too)" },
     { "delete", "offerDelete", "Offer to delete matching items that can't be sold" },
     { "transmog", "protectTransmog", "Keep gear whose appearance you haven't collected" },
@@ -944,7 +964,7 @@ module = TW.Register({
         { "", "show/hide the Bag Manager (opens by itself at a vendor when there's something to sell)" },
         { "sell", "sell everything on the Sell list (at a vendor)" },
         { "rules", "show which rules are on" },
-        { "junk | low | armor | quest | pets", "turn a selling rule on/off" },
+        { "junk | low | armor | quest | pets | known", "turn a selling rule on/off" },
         { "delete", "turn on/off offering to delete matching items that can't be sold" },
         { "transmog | tradeable | value", "turn a protection on/off (value = TSM or Auctionator price)" },
         { "auto", "turn on/off selling at the vendor without asking" },

@@ -12,6 +12,7 @@ opens with a **Sell** list and a total; click **Sell**. Turn on `auto` to sell w
 | Not your armor type | off | Cloth, leather, mail or plate you can't wear (head, shoulders, chest, waist, legs, feet, wrists, hands) |
 | Finished quests | on | Items for quests you've already done |
 | Pets you can't learn | on | Pets you already have the most of (usually 3/3). Bound ones are sold (or deleted if the vendor won't take them); tradeable ones go to the **Auction** tab instead |
+| Mounts and toys you know | on | Mounts and toys you already have. Bound ones are sold (or deleted if the vendor won't take them); tradeable ones go to the **Auction** tab |
 | Delete what can't be sold | on | Matching items with no vendor price go to the **Delete** tab: click one, confirm, gone |
 
 ## Always kept
@@ -69,7 +70,7 @@ disable it. **Keep both** stops the warning for that addon.
 | `/tw bags` | Show/hide the Bag Manager |
 | `/tw bags sell` | Sell the Sell list (at a vendor) |
 | `/tw bags rules` | Show which rules are on |
-| `/tw bags junk` / `low` / `armor` / `quest` / `pets` | Turn a selling rule on/off |
+| `/tw bags junk` / `low` / `armor` / `quest` / `pets` / `known` | Turn a selling rule on/off |
 | `/tw bags delete` | Turn on/off offering to delete items that can't be sold |
 | `/tw bags transmog` / `tradeable` / `value` | Turn a protection on/off (`value` uses TSM or Auctionator prices) |
 | `/tw bags auto` | Sell at the vendor without asking |
