@@ -50,6 +50,13 @@ buy from your bags, so items to sell say *to bags*: click one (or **Move all**) 
 vendor. WoW only deletes from your bags, so clicking an item that can't be sold moves it to your bags first and then
 asks to delete it. **Move all** moves both kinds. Right-click to keep an item.
 
+## Housing decor
+
+The **Decor** tab lists housing decor in your bags: click one and it's added to your housing storage (it works like
+right-clicking the item, so it waits until you're out of combat). Decor in the bank or warband bank shows on the
+**Bank** tab: click it (or **Move all**) to move it to your bags, then add it from the Decor tab. Right-click keeps an
+item in your bags. `/tw bags housing` turns this off.
+
 ## Other selling addons
 
 If CrapAway (or Scrap, Peddler, AutoVendor, Vendor, SellJunk) is also loaded, Bags warns at login and offers to
@@ -68,6 +75,8 @@ disable it. **Keep both** stops the warning for that addon.
 | `/tw bags auto` | Sell at the vendor without asking |
 | `/tw bags auction` | Show the Auction tab |
 | `/tw bags bank` | Show the Bank tab |
+| `/tw bags decor` | Show the Decor tab |
+| `/tw bags housing` | Turn on/off listing housing decor |
 | `/tw bags next` | Turn on/off loading the next item after you post |
 | `/tw bags mats` | Turn on/off listing crafting materials on the Auction tab |
 | `/tw bags unhide` | Bring back items you right-clicked off the Auction tab |

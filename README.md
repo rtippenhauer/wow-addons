@@ -14,7 +14,7 @@ button (the gear) and the `/tw` command. Install the ones you want. Each needs T
 | [TippWorks-Calls](addons/TippWorks-Calls/) | Delver's Call quests for levelling 80 → 90: pick up, run, hold, turn in | [`/tw calls`](addons/TippWorks-Calls/README.md) |
 | [TippWorks-Curios](addons/TippWorks-Curios/) | Curiosities and chests inside delves, with party sync, map pins and a guide arrow | [`/tw curios`](addons/TippWorks-Curios/README.md) |
 | [TippWorks-Vault](addons/TippWorks-Vault/) | Level 90 weekly gearing checklist and today's Bountiful Delves | [`/tw vault`](addons/TippWorks-Vault/README.md) |
-| [TippWorks-Bags](addons/TippWorks-Bags/) | Bag manager: sells junk, low item level gear, armor that isn't your type and finished-quest items at the vendor; deletes what can't be sold (asks first); keeps uncollected transmog; posts to the Auction House one item after another; finds what to sell in the bank and warband bank | [`/tw bags`](addons/TippWorks-Bags/README.md) |
+| [TippWorks-Bags](addons/TippWorks-Bags/) | Bag manager: sells junk, low item level gear, armor that isn't your type and finished-quest items at the vendor; deletes what can't be sold (asks first); keeps uncollected transmog; posts to the Auction House one item after another; finds what to sell in the bank and warband bank; adds housing decor to storage | [`/tw bags`](addons/TippWorks-Bags/README.md) |
 | [TippWorks-Labyrinth](addons/TippWorks-Labyrinth/) | Labyrinth of Kindo'jan: chambers done this run, the three Hexmasks, the locked room, quests picked up inside | [`/tw maze`](addons/TippWorks-Labyrinth/README.md) |
 | [TippWorks-Rares](addons/TippWorks-Rares/) | Coiled Isle daily rares: kills, route on the map, target popup | [`/tw rares` or `/crt`](addons/TippWorks-Rares/README.md) |
 
