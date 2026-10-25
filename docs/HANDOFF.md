@@ -77,6 +77,10 @@ SavedVariables: `CoiledRareTrackerDB` (per character), `CoiledRareTrackerAccount
 - **A new list starts on every zone-in** (only a `/reload` inside the delve keeps it). Safety net:
   the GUID zoneUID (`Creature-0-<srv>-<inst>-<zoneUID>-…`) identifies the delve copy; a different
   one starts a new list, and sync messages from another copy are ignored.
+- **`C_PartyInfo.IsDelveInProgress()` stays true after you leave a delve** (seen Oct 25 2026 outside in
+  Zul'Aman and in Scarlet Monastery). `TW.IsDelve` requires instance type "scenario" first. Curios also
+  treats "not in an instance" as leaving, flags the list `left` (a later `/reload` starts a new one),
+  holds party curiosities until its own scan knows the zoneUID, and drops entries from another copy.
 - A delve entered before the scenario starts reports difficulty 0 and shows no curiosities.
 - **Addon messages get throttled** (SendAddonMessage result 3). The outbox is de-duplicated and
   drained one message per 0.4 s. Hello `H|<ver>` is answered with `R|<ver>` (never answered back);
