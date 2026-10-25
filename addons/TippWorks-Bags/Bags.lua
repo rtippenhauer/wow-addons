@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.2.0"
+ns.VERSION = "1.3.0"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -111,13 +111,51 @@ local function Money(c) return GetCoinTextureString and GetCoinTextureString(c) 
 -- Returns nil when TSM isn't loaded or has no price for the item.
 local TSM_PRICE = "first(dbmarket, dbregionmarketavg)"
 local function TSMLoaded() return TSM_API and TSM_API.GetCustomPriceValue and TSM_API.ToItemString and true or false end
-local function TSMValue(link)
+local function TSMPrice(priceString, link)
     if not TSMLoaded() then return nil end
     local ok, itemString = pcall(TSM_API.ToItemString, link)
     if not ok or not itemString then return nil end
-    local ok2, v = pcall(TSM_API.GetCustomPriceValue, TSM_PRICE, itemString)
+    local ok2, v = pcall(TSM_API.GetCustomPriceValue, priceString, itemString)
     v = ok2 and tonumber(v)
     return v and v > 0 and v or nil
+end
+
+-- Auctionator's public API (Auctionator.API.v1): prices from your own scans, how many days
+-- old they are (nil past 21 days), and what disenchanting would bring.
+local AUCTIONATOR_ID = "TippWorks-Bags"
+local function AuctionatorAPI(fn, link)
+    local api = Auctionator and Auctionator.API and Auctionator.API.v1
+    local f = api and api[fn]
+    if not f then return nil end
+    local ok, v = pcall(f, AUCTIONATOR_ID, link)
+    v = ok and tonumber(v)
+    return v
+end
+
+-- What the Auction House addons know about an item: market (per item), where it came from,
+-- the age in days (Auctionator only) and the disenchant value. TSM wins when both know.
+local function Prices(link)
+    local p = {}
+    p.market = TSMPrice(TSM_PRICE, link)
+    if p.market then p.source = "TSM"
+    else
+        p.market = AuctionatorAPI("GetAuctionPriceByItemLink", link)
+        if p.market and p.market > 0 then
+            p.source = "Auctionator"
+            p.age = AuctionatorAPI("GetAuctionAgeByItemLink", link)
+        else p.market = nil end
+    end
+    p.de = TSMPrice("destroy", link) or AuctionatorAPI("GetDisenchantPriceByItemLink", link)
+    if p.de and p.de <= 0 then p.de = nil end
+    return p
+end
+
+local function PriceNote(p)
+    local s = p.source
+    if p.source == "Auctionator" then
+        s = s .. (p.age and (p.age == 0 and ", today" or (", %d day%s old"):format(p.age, p.age == 1 and "" or "s")) or ", 3+ weeks old")
+    end
+    return s
 end
 -- Worth keeping for the Auction House: at least this many times the vendor price, and at least 1 gold.
 local VALUE_FACTOR, VALUE_MIN = 3, 10000
@@ -160,8 +198,9 @@ local function Scan()
                         end
                     end
                     -- Why it must stay (wins over every rule).
-                    local keep, market
-                    if not info.isBound and quality and quality >= 1 then market = TSMValue(link) end
+                    local keep
+                    local prices = quality and quality >= 1 and Prices(link) or {}
+                    local market = not info.isBound and prices.market or nil
                     if why then
                         if db.keep[info.itemID] then keep = "you keep it"
                         elseif quality and quality >= 5 then keep = "legendary or better"
@@ -172,7 +211,7 @@ local function Scan()
                         elseif gear and Opt("protectTradeable") and not info.isBound and quality and quality >= 3 then
                             keep = "not bound - could go on the Auction House"
                         elseif market and Opt("protectValue") and market >= VALUE_MIN and market >= VALUE_FACTOR * (price or 0) then
-                            keep = "worth " .. Money(market) .. " on the Auction House (TSM)"
+                            keep = "worth " .. Money(market) .. " on the Auction House (" .. PriceNote(prices) .. ")"
                         end
                     end
                     if why and keep then
@@ -183,6 +222,10 @@ local function Scan()
                         if Opt("offerDelete") then out.delete[#out.delete + 1] = e end
                     elseif why then
                         e.why = why
+                        -- Worth more as enchanting materials? Say so (EasyDisenchant can do it).
+                        if gear and prices.de and prices.de > (price or 0) then
+                            e.why = why .. "  |cffa335ee(disenchant ~" .. Money(prices.de) .. ")|r"
+                        end
                         out.sell[#out.sell + 1] = e
                     end
                     -- Could go on the Auction House (anything not headed for the vendor).
@@ -192,7 +235,8 @@ local function Scan()
                     if kind and Postable(bag, slot) then
                         local a = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
                             count = e.count, price = e.price, quality = quality, why = kind,
-                            market = market and market * e.count }
+                            market = market and market * e.count, priceNote = market and PriceNote(prices),
+                            de = gear and prices.de }
                         if kind == "unbound gear" then
                             a.ilvl = ItemLevel(link)
                             if a.ilvl then a.why = kind .. " " .. a.ilvl end
@@ -220,6 +264,7 @@ local function Scan()
     end)
     return out
 end
+ns.Scan = Scan -- for tests
 
 ---------------------------------------------------------------------------
 -- Selling and deleting
@@ -379,6 +424,8 @@ local function Row(i)
         GameTooltip:SetBagItem(e.bag, e.slot)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("TippWorks: " .. e.why, 1, 0.82, 0, true)
+        if e.market then GameTooltip:AddLine("Auction price: " .. Money(e.market) .. " (" .. e.priceNote .. ")", 1, 1, 1) end
+        if e.de then GameTooltip:AddLine("Disenchant: ~" .. Money(e.de), 0.64, 0.21, 0.93) end
         GameTooltip:AddLine(db.tab == "auction" and "Click: load it into Post  |  Right-click: don't list it"
             or db.tab == "delete" and "Left-click: delete (asks first)  |  Right-click: keep it"
             or db.tab == "kept" and "Click: let it be sold again" or "Click: keep it (never sell)", 0.6, 0.6, 0.6)
@@ -475,7 +522,7 @@ local RULES = {
     { "delete", "offerDelete", "Offer to delete matching items that can't be sold" },
     { "transmog", "protectTransmog", "Keep gear whose appearance you haven't collected" },
     { "tradeable", "protectTradeable", "Keep unbound blue and epic gear (Auction House)" },
-    { "value", "protectValue", "Keep items TSM says are worth 3x their vendor price (1g+) on the Auction House" },
+    { "value", "protectValue", "Keep items worth 3x their vendor price (1g+) on the Auction House (TSM or Auctionator prices)" },
     { "auto", "autoSell", "Sell at the vendor without asking" },
     { "next", "autoNext", "Auction House: after you post, load the next item" },
     { "mats", "auctionMats", "Auction tab: list crafting materials too" },
@@ -547,7 +594,7 @@ module = TW.Register({
         { "rules", "show which rules are on" },
         { "junk | low | armor | quest", "turn a selling rule on/off" },
         { "delete", "turn on/off offering to delete matching items that can't be sold" },
-        { "transmog | tradeable | value", "turn a protection on/off (value = TSM price)" },
+        { "transmog | tradeable | value", "turn a protection on/off (value = TSM or Auctionator price)" },
         { "auto", "turn on/off selling at the vendor without asking" },
         { "auction", "show the Auction tab (opens by itself at the Auction House)" },
         { "next | mats", "Auction House: load the next item after a post / list materials too" },
