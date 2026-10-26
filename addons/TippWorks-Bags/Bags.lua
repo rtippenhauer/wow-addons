@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.8.0"
+ns.VERSION = "1.8.1"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -821,7 +821,7 @@ end
 
 local function CreateWindow()
     win = TW.CreateWindow({ name = "TippWorksBagsFrame", title = "Bag Manager", version = ns.VERSION,
-        width = WIDTH, db = db, flatTabs = true, onTab = function() ns.Refresh() end, tabs = {
+        width = WIDTH, db = db, onTab = function() ns.Refresh() end, tabs = {
             { key = "sell", label = "Sell", title = "Bag Manager - sell" },
             { key = "delete", label = "Delete", title = "Bag Manager - can't sell" },
             { key = "kept", label = "Kept", title = "Bag Manager - held back" },

@@ -9,7 +9,6 @@ local TW = ns.TW
 --       keepOnEscape = true,                        -- optional: Escape doesn't close it
 --       tabs = { { key = "weekly", label = "Weekly", title = "Weekly Checklist (90)" }, ... },
 --       onTab = function(key) end,                  -- after a tab is selected
---       flatTabs = true,                            -- optional: text tabs with counts (win:SetTabCount)
 --   })
 --   win.top   -> y offset (negative) where page content starts
 --   win:SelectTab(key), win:Toggle([show])
@@ -51,8 +50,8 @@ function TW.CreateWindow(o)
     f.tabs = {}
     f.top = o.tabs and -54 or -34
     local order = {}
-    if o.flatTabs then
-        -- Flat tabs: text sized to the label, an accent underline on the selected one,
+    if o.tabs then
+        -- Tabs: text sized to the label, an accent underline on the selected one,
         -- and an optional count after the label (f:SetTabCount).
         local r, g, bl = tonumber(TW.COLOR:sub(1, 2), 16) / 255, tonumber(TW.COLOR:sub(3, 4), 16) / 255, tonumber(TW.COLOR:sub(5, 6), 16) / 255
         local rule = f:CreateTexture(nil, "ARTWORK")
@@ -77,18 +76,9 @@ function TW.CreateWindow(o)
             f.tabs[t.key] = { button = b, def = t }
             order[#order + 1] = f.tabs[t.key]
         end
-    else
-        for i, t in ipairs(o.tabs or {}) do
-            local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-            b:SetSize(78, 20)
-            b:SetPoint("TOPLEFT", 10 + (i - 1) * 82, -30)
-            b:SetText(t.label)
-            b:SetScript("OnClick", function() f:SelectTab(t.key) end)
-            f.tabs[t.key] = { button = b, def = t }
-        end
     end
 
-    -- Flat tabs: label colors and widths change with the selection and the counts.
+    -- Label colors and widths change with the selection and the counts.
     local function Layout()
         local x = 10
         for _, t in ipairs(order) do
@@ -106,7 +96,7 @@ function TW.CreateWindow(o)
         end
     end
 
-    -- Flat tabs only: show a count after a tab's label (nil hides it; 0 dims the tab).
+    -- Show a count after a tab's label (nil hides it; 0 dims the tab).
     function f:SetTabCount(key, n)
         local t = self.tabs[key]
         if not t or t.count == n then return end
@@ -117,13 +107,7 @@ function TW.CreateWindow(o)
     function f:SelectTab(key)
         if not self.tabs[key] then return end
         o.db.tab = key
-        if o.flatTabs then Layout()
-        else
-            for k, t in pairs(self.tabs) do
-                if k == key then t.button:LockHighlight() else t.button:UnlockHighlight() end
-                t.button:SetEnabled(k ~= key)
-            end
-        end
+        Layout()
         self.title:SetText(self.tabs[key].def.title or o.title or "")
         if o.onTab then o.onTab(key) end
     end
