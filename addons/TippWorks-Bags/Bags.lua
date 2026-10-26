@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.8.1"
+ns.VERSION = "1.9.0"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -28,7 +28,7 @@ local WIDTH, ROW_H = 500, 18
 
 -- Defaults: junk and finished-quest items on; the gear rules are opt-in.
 local DEFAULTS = {
-    junk = true, lowLevel = false, wrongArmor = false, quest = true, pets = true, known = true, decor = true, open = true, offerDelete = true,
+    junk = true, lowLevel = false, wrongArmor = false, quest = true, pets = true, known = true, decor = true, cosmetic = true, open = true, offerDelete = true,
     protectTransmog = true, protectTradeable = true, autoSell = false, ilvlGap = 20,
     autoNext = true, auctionMats = false, protectValue = true,
 }
@@ -86,6 +86,31 @@ local function IsDecor(itemID, classID)
         if ok and v then return true end
     end
     return Enum and Enum.ItemClass and Enum.ItemClass.Housing ~= nil and classID == Enum.ItemClass.Housing
+end
+
+-- Cosmetics you learn by using them: ensembles, arsenals, illusions, appearance and customization unlocks.
+-- Read from the item's "Use:" line; "Already known" ones aren't listed.
+local COSMETIC_WORDS = { "appearance", "ensemble", "arsenal", "illusion", "transmog", "customization" }
+local function IsCosmetic(bag, slot, itemID)
+    if not (C_Item.GetItemSpell and Safe(C_Item.GetItemSpell, itemID)) then return false end
+    if not (C_TooltipInfo and C_TooltipInfo.GetBagItem) then return false end
+    local ok, data = pcall(C_TooltipInfo.GetBagItem, bag, slot)
+    if not ok or type(data) ~= "table" or type(data.lines) ~= "table" then return false end
+    local use = type(ITEM_SPELL_TRIGGER_ONUSE) == "string" and ITEM_SPELL_TRIGGER_ONUSE or "Use:"
+    local cosmetic = false
+    for _, line in ipairs(data.lines) do
+        local t = line.leftText
+        if type(t) == "string" and not (issecretvalue and issecretvalue(t)) then
+            if t == ITEM_SPELL_KNOWN then return false end
+            if t:sub(1, #use) == use then
+                local low = t:lower()
+                for _, w in ipairs(COSMETIC_WORDS) do
+                    if low:find(w, 1, true) then cosmetic = true end
+                end
+            end
+        end
+    end
+    return cosmetic
 end
 
 -- Lockboxes say "Locked" on their tooltip until a rogue or a key opens them.
@@ -313,10 +338,16 @@ local function Scan(bank)
                             count = info.stackCount or 1, price = 0, why = "open it for loot" }
                     end
                 elseif name and Opt("decor") and IsDecor(info.itemID, classID) then
-                    -- Housing decor goes to the Decor tab: one click adds it to your housing storage.
+                    -- Housing decor goes to the Collect tab: one click adds it to your housing storage.
                     if not db.keep[info.itemID] then
                         out.decor[#out.decor + 1] = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
                             count = info.stackCount or 1, price = 0, why = "housing decor" }
+                    end
+                elseif name and Opt("cosmetic") and (equipLoc or "") == "" and IsCosmetic(bag, slot, info.itemID) then
+                    -- Cosmetics share the Collect (decor) tab: one click learns it.
+                    if not db.keep[info.itemID] then
+                        out.decor[#out.decor + 1] = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
+                            count = info.stackCount or 1, price = 0, why = "cosmetic - use it to learn it", cosmetic = true }
                     end
                 elseif name then
                     local e = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
@@ -642,7 +673,7 @@ end
 ---------------------------------------------------------------------------
 -- Tabs whose rows use the item (a secure click).
 local USE_TAB = { decor = true, open = true }
--- Using an item needs a secure button: each Decor and Open row gets one on top. They live on UIParent and
+-- Using an item needs a secure button: each Collect and Open row gets one on top. They live on UIParent and
 -- are only placed and shown out of combat, so the window itself can still move and hide in combat.
 local secureButtons, secureOf = {}, {}
 local function HideSecure()
@@ -664,6 +695,7 @@ local function SecureFor(row)
         if not e then return end
         if btn == "RightButton" then ToggleKeep(e) return end
         if db.tab == "open" then TW.Log("BAGS", "opened %s", e.name)
+        elseif e.cosmetic then TW.Log("BAGS", "learned %s", e.name)
         else TW.Log("BAGS", "added %s to housing storage", e.name) end
         C_Timer.After(0.5, ns.Refresh)
     end)
@@ -720,10 +752,11 @@ local function Row(i)
         GameTooltip:AddLine("TippWorks: " .. e.why, 1, 0.82, 0, true)
         if e.market then GameTooltip:AddLine("Auction price: " .. Money(e.market) .. " (" .. e.priceNote .. ")", 1, 1, 1) end
         if e.de then GameTooltip:AddLine("Disenchant: ~" .. Money(e.de), 0.64, 0.21, 0.93) end
-        GameTooltip:AddLine(db.tab == "decor" and "Click: add it to your housing storage  |  Right-click: keep it in your bags"
+        GameTooltip:AddLine(db.tab == "decor" and (e.cosmetic and "Click: learn it  |  Right-click: keep it in your bags"
+                or "Click: add it to your housing storage  |  Right-click: keep it in your bags")
             or db.tab == "open" and "Click: open it  |  Right-click: don't list it"
             or db.tab == "bank" and (e.action == "delete" and "Click: move to your bags and delete (asks first)  |  Right-click: keep it"
-                or e.action == "decor" and "Click: move to your bags (then add it from the Decor tab)  |  Right-click: keep it"
+                or e.action == "decor" and "Click: move to your bags (then use it from the Collect tab)  |  Right-click: keep it"
                 or "Click: move to your bags (sell at a vendor)  |  Right-click: keep it")
             or db.tab == "auction" and "Click: load it into Post  |  Right-click: don't list it"
             or db.tab == "delete" and "Left-click: delete (asks first)  |  Right-click: keep it"
@@ -761,7 +794,7 @@ function ns.Refresh()
             b.right:SetText("|cff33ff99open|r")
         elseif db.tab == "bank" then
             b.right:SetText(e.action == "delete" and "|cffff6060to bags, delete|r"
-                or e.action == "decor" and "|cff33ff99to bags|r, decor" or ("|cff33ff99to bags|r " .. Money(e.price)))
+                or e.action == "decor" and "|cff33ff99to bags|r, collect" or ("|cff33ff99to bags|r " .. Money(e.price)))
         else
             b.right:SetText(db.tab == "delete" and "|cffff6060delete|r" or (e.price > 0 and Money(e.price) or ""))
         end
@@ -788,14 +821,14 @@ function ns.Refresh()
             or "|cff888888Click one to open it (once per item).|r"
     elseif db.tab == "decor" then
         win.sell:Hide()
-        footer = n == 0 and "|cff888888No housing decor in your bags.|r"
-            or InCombatLockdown() and "|cff888888After combat: click one to add it to your housing storage.|r"
-            or "|cff888888Click one to add it to your housing storage.|r"
+        footer = n == 0 and "|cff888888No housing decor or cosmetics to collect in your bags.|r"
+            or InCombatLockdown() and "|cff888888After combat: click one to collect it.|r"
+            or "|cff888888Click one: decor goes to your housing storage, cosmetics are learned.|r"
     elseif db.tab == "bank" then
         win.sell:Hide()
         footer = not bankOpen and "|cff888888Open your bank or warband bank to check it.|r"
             or n == 0 and "|cff888888Nothing in the bank to sell or delete.|r"
-            or ("|cff888888%d to sell, %d to delete or add as decor - all go to your bags first.|r")
+            or ("|cff888888%d to sell, %d to delete or collect - all go to your bags first.|r")
                 :format(toMove, n - toMove)
     elseif db.tab == "auction" then
         win.sell:Hide()
@@ -827,7 +860,7 @@ local function CreateWindow()
             { key = "kept", label = "Kept", title = "Bag Manager - held back" },
             { key = "auction", label = "Auction", title = "Bag Manager - Auction House" },
             { key = "bank", label = "Bank", title = "Bag Manager - bank" },
-            { key = "decor", label = "Decor", title = "Bag Manager - housing decor" },
+            { key = "decor", label = "Collect", title = "Bag Manager - decor and cosmetics" },
             { key = "open", label = "Open", title = "Bag Manager - open for loot" },
         } })
     win.footer = win:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -869,7 +902,8 @@ local RULES = {
     { "pets", "pets", "Sell pets you can't learn any more (bound ones; tradeable ones go to the Auction tab)" },
     { "known", "known", "Sell mounts and toys you already know (bound ones; tradeable ones go to the Auction tab)" },
     { "containers", "open", "List bags and caches you can open (Open tab)" },
-    { "housing", "decor", "List housing decor to add to your housing storage (Decor tab; from the bank too)" },
+    { "housing", "decor", "List housing decor to add to your housing storage (Collect tab; from the bank too)" },
+    { "cosmetics", "cosmetic", "List cosmetics you learn by using them (Collect tab; from the bank too)" },
     { "delete", "offerDelete", "Offer to delete matching items that can't be sold" },
     { "transmog", "protectTransmog", "Keep gear whose appearance you haven't collected" },
     { "tradeable", "protectTradeable", "Keep unbound blue and epic gear (Auction House)" },
@@ -895,7 +929,7 @@ local function Command(rest)
     if sub == "rules" then ShowRules() return end
     if sub == "auction" or sub == "ah" then db.tab = "auction"; win:SelectTab("auction"); win:Show() return end
     if sub == "bank" then db.tab = "bank"; win:SelectTab("bank"); win:Show() return end
-    if sub == "decor" then db.tab = "decor"; win:SelectTab("decor"); win:Show() return end
+    if sub == "decor" or sub == "collect" then db.tab = "decor"; win:SelectTab("decor"); win:Show() return end
     if sub == "open" then db.tab = "open"; win:SelectTab("open"); win:Show() return end
     if sub == "why" then
         -- Everything Bags sees about one item (also in /tw log), to explain where it's listed or why it isn't.
@@ -925,7 +959,7 @@ local function Command(rest)
         Out("opens for loot: %s", tostring(info.hasLoot))
         for _, list in ipairs({ "sell", "delete", "kept", "auction", "decor", "open" }) do
             for _, e in ipairs(scan[list]) do
-                if not where and e.bag == found.bag and e.slot == found.slot then where = list .. " tab: " .. e.why end
+                if not where and e.bag == found.bag and e.slot == found.slot then where = (list == "decor" and "collect" or list) .. " tab: " .. e.why end
             end
         end
         Out("listed on: %s", where or ("nothing" .. (Opt("offerDelete") and "" or " (offering to delete is off)")))
@@ -1007,8 +1041,8 @@ module = TW.Register({
         { "auto", "turn on/off selling at the vendor without asking" },
         { "auction", "show the Auction tab (opens by itself at the Auction House)" },
         { "bank", "show the Bank tab: what in the bank to sell or delete (opens by itself at the bank)" },
-        { "decor", "show the Decor tab: housing decor to add to your housing storage" },
-        { "housing", "turn on/off listing housing decor" },
+        { "collect", "show the Collect tab: housing decor and cosmetics you learn by using them" },
+        { "housing | cosmetics", "turn on/off listing housing decor / cosmetics" },
         { "open", "show the Open tab: bags, caches and the like to open for loot" },
         { "containers", "turn on/off listing things to open" },
         { "next | mats", "Auction House: load the next item after a post / list materials too" },
@@ -1118,7 +1152,7 @@ ev:SetScript("OnEvent", function(self, event, ...)
         end
         return
     end
-    -- Combat: the secure Decor/Open buttons are pulled off the window just before lockdown starts.
+    -- Combat: the secure Collect/Open buttons are pulled off the window just before lockdown starts.
     if event == "PLAYER_REGEN_DISABLED" then HideSecure() return end
     if event == "PLAYER_REGEN_ENABLED" then TW.Guard("bags refresh", ns.Refresh) return end
     if event == "PLAYER_LOGIN" then

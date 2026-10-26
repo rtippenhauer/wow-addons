@@ -51,12 +51,13 @@ buy from your bags, so items to sell say *to bags*: click one (or **Move all**) 
 vendor. WoW only deletes from your bags, so clicking an item that can't be sold moves it to your bags first and then
 asks to delete it. **Move all** moves both kinds. Right-click to keep an item.
 
-## Housing decor
+## Housing decor and cosmetics
 
-The **Decor** tab lists housing decor in your bags: click one and it's added to your housing storage (it works like
-right-clicking the item, so it waits until you're out of combat). Decor in the bank or warband bank shows on the
-**Bank** tab: click it (or **Move all**) to move it to your bags, then add it from the Decor tab. Right-click keeps an
-item in your bags. `/tw bags housing` turns this off.
+The **Collect** tab lists housing decor and cosmetics you learn by using them (ensembles, arsenals, illusions,
+appearance and customization unlocks) that you don't know yet. Click one: decor is added to your housing storage and
+a cosmetic is learned (it works like right-clicking the item, so it waits until you're out of combat). Ones in the
+bank or warband bank show on the **Bank** tab: click it (or **Move all**) to move it to your bags, then use it from the
+Collect tab. Right-click keeps an item in your bags. `/tw bags housing` and `/tw bags cosmetics` turn these off.
 
 ## Opening bags and caches
 
@@ -88,8 +89,9 @@ disable it. **Keep both** stops the warning for that addon.
 | `/tw bags auto` | Sell at the vendor without asking |
 | `/tw bags auction` | Show the Auction tab |
 | `/tw bags bank` | Show the Bank tab |
-| `/tw bags decor` | Show the Decor tab |
+| `/tw bags collect` | Show the Collect tab (`decor` works too) |
 | `/tw bags housing` | Turn on/off listing housing decor |
+| `/tw bags cosmetics` | Turn on/off listing cosmetics you learn by using them |
 | `/tw bags open` | Show the Open tab |
 | `/tw bags containers` | Turn on/off listing things to open |
 | `/tw bags next` | Turn on/off loading the next item after you post |
