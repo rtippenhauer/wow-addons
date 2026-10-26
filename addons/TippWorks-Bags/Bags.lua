@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.9.1"
+ns.VERSION = "1.9.2"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -89,20 +89,25 @@ local function IsDecor(itemID, classID)
 end
 
 -- Cosmetics you learn by using them: ensembles, arsenals, illusions, appearance and customization unlocks.
--- Read from the item's "Use:" line; "Already known" ones aren't listed.
+-- Read from the item's "Use:" line; "Already known" ones aren't listed. Returns the answer and, for
+-- /tw bags why, the Use line it read and whether the tooltip says the appearance isn't collected.
 local COSMETIC_WORDS = { "appearance", "ensemble", "arsenal", "illusion", "transmog", "customization" }
-local function IsCosmetic(bag, slot, itemID)
-    if not (C_Item.GetItemSpell and Safe(C_Item.GetItemSpell, itemID)) then return false end
+local function IsCosmetic(bag, slot)
     if not (C_TooltipInfo and C_TooltipInfo.GetBagItem) then return false end
     local ok, data = pcall(C_TooltipInfo.GetBagItem, bag, slot)
     if not ok or type(data) ~= "table" or type(data.lines) ~= "table" then return false end
     local use = type(ITEM_SPELL_TRIGGER_ONUSE) == "string" and ITEM_SPELL_TRIGGER_ONUSE or "Use:"
-    local cosmetic = false
+    local unknown = type(TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN) == "string" and TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN
+        or "You haven't collected this appearance"
+    local cosmetic, useLine, uncollected = false, nil, false
     for _, line in ipairs(data.lines) do
         local t = line.leftText
         if type(t) == "string" and not (issecretvalue and issecretvalue(t)) then
-            if t == ITEM_SPELL_KNOWN then return false end
+            t = t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+            if t == ITEM_SPELL_KNOWN then return false, useLine, uncollected end
+            if t == unknown then uncollected = true end
             if t:sub(1, #use) == use then
+                useLine = t
                 local low = t:lower()
                 for _, w in ipairs(COSMETIC_WORDS) do
                     if low:find(w, 1, true) then cosmetic = true end
@@ -110,7 +115,7 @@ local function IsCosmetic(bag, slot, itemID)
             end
         end
     end
-    return cosmetic
+    return cosmetic, useLine, uncollected
 end
 
 -- Lockboxes say "Locked" on their tooltip until a rogue or a key opens them.
@@ -177,6 +182,13 @@ local function UncollectedAppearance(link)
         if type(info) == "table" and info.isCollected then return false end
     end
     return true
+end
+
+-- A cosmetic to learn: wearable ones only while their appearance is uncollected (the API or the tooltip says so).
+local function CosmeticToLearn(bag, slot, link, equipLoc)
+    local cosmetic, _, uncollected = IsCosmetic(bag, slot)
+    if not cosmetic then return false end
+    return (equipLoc or "") == "" or uncollected or UncollectedAppearance(link)
 end
 
 ---------------------------------------------------------------------------
@@ -343,8 +355,7 @@ local function Scan(bank)
                         out.decor[#out.decor + 1] = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
                             count = info.stackCount or 1, price = 0, why = "housing decor" }
                     end
-                elseif name and Opt("cosmetic") and ((equipLoc or "") == "" or UncollectedAppearance(link))
-                    and IsCosmetic(bag, slot, info.itemID) then
+                elseif name and Opt("cosmetic") and CosmeticToLearn(bag, slot, link, equipLoc) then
                     -- Cosmetics share the Collect (decor) tab: one click learns it. Wearable ones ("Use: Add this
                     -- appearance to your Warband collection") only while the appearance is still uncollected.
                     if not db.keep[info.itemID] then
@@ -959,6 +970,10 @@ local function Command(rest)
         local scan = Scan()
         local where
         Out("opens for loot: %s", tostring(info.hasLoot))
+        local cosmetic, useLine, uncollected = IsCosmetic(found.bag, found.slot)
+        Out("slot %s, use line %s, cosmetic %s, tooltip says uncollected %s, API says uncollected %s, decor %s",
+            tostring(equipLoc), useLine and ("\"" .. useLine .. "\"") or "none", tostring(cosmetic), tostring(uncollected),
+            tostring(UncollectedAppearance(info.hyperlink)), tostring(IsDecor(id, classID)))
         for _, list in ipairs({ "sell", "delete", "kept", "auction", "decor", "open" }) do
             for _, e in ipairs(scan[list]) do
                 if not where and e.bag == found.bag and e.slot == found.slot then where = (list == "decor" and "collect" or list) .. " tab: " .. e.why end
