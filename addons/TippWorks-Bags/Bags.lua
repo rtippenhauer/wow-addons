@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.9.2"
+ns.VERSION = "1.10.0"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -360,7 +360,8 @@ local function Scan(bank)
                     -- appearance to your Warband collection") only while the appearance is still uncollected.
                     if not db.keep[info.itemID] then
                         out.decor[#out.decor + 1] = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
-                            count = info.stackCount or 1, price = 0, why = "cosmetic - use it to learn it", cosmetic = true }
+                            count = info.stackCount or 1, price = 0, cosmetic = true, wear = (equipLoc or "") ~= "",
+                            why = (equipLoc or "") ~= "" and "cosmetic - wear it once to collect it" or "cosmetic - use it to learn it" }
                     end
                 elseif name then
                     local e = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
@@ -608,6 +609,93 @@ local function FreeBagSlots()
     return n
 end
 
+---------------------------------------------------------------------------
+-- Wearable cosmetics: the appearance is only added while you wear the item. A click
+-- puts it on, waits until the appearance is collected, then puts your own item back.
+---------------------------------------------------------------------------
+local swap -- { link, name, invSlot, old, bag, slot, ticks, ticker }
+
+local function ItemIDOf(link) return link and tonumber(link:match("item:(%d+)")) end
+
+local function FindInBags(link)
+    local id = ItemIDOf(link)
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and (info.hyperlink == link or info.itemID == id) then return bag, slot end
+        end
+    end
+end
+
+local function EmptyBagSlot()
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        local _, family = C_Container.GetContainerNumFreeSlots(bag)
+        if (family or 0) == 0 then
+            for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+                if not C_Container.GetContainerItemInfo(bag, slot) then return bag, slot end
+            end
+        end
+    end
+end
+
+-- Puts your own item back on (or takes the cosmetic off when the slot was empty).
+local function SwapBack(note)
+    local s = swap
+    if not s then Print("nothing to swap back.") return end
+    if InCombatLockdown() then Print("after combat: /tw bags swapback puts your gear back.") return end
+    if s.ticker then s.ticker:Cancel() end
+    swap = nil
+    ClearCursor()
+    if s.old then
+        local bag, slot = FindInBags(s.old)
+        if not bag then Print(("couldn't find %s in your bags - put it back on yourself."):format(s.old)) return end
+        C_Container.PickupContainerItem(bag, slot)
+        EquipCursorItem(s.invSlot)
+    else
+        local bag, slot = EmptyBagSlot()
+        if not bag then Print("your bags are full - take " .. s.name .. " off yourself.") return end
+        PickupInventoryItem(s.invSlot)
+        C_Container.PickupContainerItem(bag, slot)
+    end
+    TW.Log("BAGS", "%s, swapped back: %s", note, s.name)
+    if note == "learned" then Print(s.name .. ": appearance collected, your gear is back on.") end
+    C_Timer.After(0.5, ns.Refresh)
+end
+
+local function WatchSwap()
+    local s = swap
+    if not s or InCombatLockdown() then return end
+    s.ticks = s.ticks + 1
+    local worn = ItemIDOf(GetInventoryItemLink("player", s.invSlot)) == ItemIDOf(s.link)
+    if worn and not UncollectedAppearance(s.link) then SwapBack("learned") return end
+    if not worn and s.ticks >= 20 and FindInBags(s.link) then
+        -- It never went on (the bind popup was declined, or the game refused).
+        s.ticker:Cancel()
+        swap = nil
+        Print(s.name .. " wasn't put on - nothing changed.")
+        return
+    end
+    if worn and s.ticks == 10 then
+        Print(s.name .. " is on, but its appearance isn't collected yet. Right-click it in your character panel"
+            .. " to use it; your gear goes back on once it's collected (or /tw bags swapback).")
+    end
+end
+
+local function WearToLearn(e)
+    if swap then Print("still waiting on " .. swap.name .. " - /tw bags swapback puts your gear back.") return end
+    if InCombatLockdown() then Print("after combat: click it again.") return end
+    local equipLoc = select(9, C_Item.GetItemInfo(e.link))
+    local invSlot = SLOTS[equipLoc or ""] and SLOTS[equipLoc][1]
+    if not invSlot then Print("can't tell which slot " .. e.name .. " goes in.") return end
+    swap = { link = e.link, name = e.name, invSlot = invSlot, old = GetInventoryItemLink("player", invSlot),
+        bag = e.bag, slot = e.slot, ticks = 0 }
+    ClearCursor()
+    C_Container.PickupContainerItem(e.bag, e.slot)
+    EquipCursorItem(invSlot)
+    TW.Log("BAGS", "wearing %s to collect its appearance", e.name)
+    swap.ticker = C_Timer.NewTicker(0.5, function() TW.Guard("bags swap", WatchSwap) end)
+end
+
 -- With the bank open, using a bank item moves it to your bags.
 local function MoveToBags(e)
     if not bankOpen then Print("open your bank first.") return false end
@@ -748,7 +836,9 @@ local function Row(i)
         if db.tab == "auction" then
             if btn == "RightButton" then ToggleHide(e) else LoadForPost(e) end
         elseif USE_TAB[db.tab] then
-            if btn == "RightButton" then ToggleKeep(e) else Print("after combat: click it again.") end
+            if btn == "RightButton" then ToggleKeep(e)
+            elseif e.wear then TW.Guard("bags wear", WearToLearn, e)
+            else Print("after combat: click it again.") end
         elseif db.tab == "bank" and btn ~= "RightButton" then
             if e.action == "delete" then MoveThenDelete(e)
             elseif MoveToBags(e) then C_Timer.After(0.3, ns.Refresh) end
@@ -765,7 +855,8 @@ local function Row(i)
         GameTooltip:AddLine("TippWorks: " .. e.why, 1, 0.82, 0, true)
         if e.market then GameTooltip:AddLine("Auction price: " .. Money(e.market) .. " (" .. e.priceNote .. ")", 1, 1, 1) end
         if e.de then GameTooltip:AddLine("Disenchant: ~" .. Money(e.de), 0.64, 0.21, 0.93) end
-        GameTooltip:AddLine(db.tab == "decor" and (e.cosmetic and "Click: learn it  |  Right-click: keep it in your bags"
+        GameTooltip:AddLine(db.tab == "decor" and (e.wear and "Click: put it on until the appearance is collected, then your gear goes back on  |  Right-click: keep it in your bags"
+                or e.cosmetic and "Click: learn it  |  Right-click: keep it in your bags"
                 or "Click: add it to your housing storage  |  Right-click: keep it in your bags")
             or db.tab == "open" and "Click: open it  |  Right-click: don't list it"
             or db.tab == "bank" and (e.action == "delete" and "Click: move to your bags and delete (asks first)  |  Right-click: keep it"
@@ -805,6 +896,8 @@ function ns.Refresh()
             b.right:SetText(loaded and "|cff33ff33in Post|r" or e.market and Money(e.market) or "")
         elseif db.tab == "open" then
             b.right:SetText("|cff33ff99open|r")
+        elseif e.wear then
+            b.right:SetText(swap and ItemIDOf(swap.link) == e.itemID and "|cffffcc00wearing|r" or "|cff33ff99wear once|r")
         elseif db.tab == "bank" then
             b.right:SetText(e.action == "delete" and "|cffff6060to bags, delete|r"
                 or e.action == "decor" and "|cff33ff99to bags|r, collect" or ("|cff33ff99to bags|r " .. Money(e.price)))
@@ -812,7 +905,7 @@ function ns.Refresh()
             b.right:SetText(db.tab == "delete" and "|cffff6060delete|r" or (e.price > 0 and Money(e.price) or ""))
         end
         b:Show()
-        if USE_TAB[db.tab] then PlaceSecure(b, e)
+        if USE_TAB[db.tab] and not e.wear then PlaceSecure(b, e)
         elseif secureOf[b] and not InCombatLockdown() then secureOf[b]:Hide(); secureOf[b]:ClearAllPoints() end
     end
     for i = n + 1, #rows do
@@ -943,6 +1036,7 @@ local function Command(rest)
     if sub == "auction" or sub == "ah" then db.tab = "auction"; win:SelectTab("auction"); win:Show() return end
     if sub == "bank" then db.tab = "bank"; win:SelectTab("bank"); win:Show() return end
     if sub == "decor" or sub == "collect" then db.tab = "decor"; win:SelectTab("decor"); win:Show() return end
+    if sub == "swapback" then SwapBack("swapped back by hand") return end
     if sub == "open" then db.tab = "open"; win:SelectTab("open"); win:Show() return end
     if sub == "why" then
         -- Everything Bags sees about one item (also in /tw log), to explain where it's listed or why it isn't.
@@ -1060,6 +1154,7 @@ module = TW.Register({
         { "bank", "show the Bank tab: what in the bank to sell or delete (opens by itself at the bank)" },
         { "collect", "show the Collect tab: housing decor and cosmetics you learn by using them" },
         { "housing | cosmetics", "turn on/off listing housing decor / cosmetics" },
+        { "swapback", "put your own gear back on after wearing a cosmetic to collect it" },
         { "open", "show the Open tab: bags, caches and the like to open for loot" },
         { "containers", "turn on/off listing things to open" },
         { "next | mats", "Auction House: load the next item after a post / list materials too" },

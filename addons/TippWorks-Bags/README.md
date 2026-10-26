@@ -55,9 +55,15 @@ asks to delete it. **Move all** moves both kinds. Right-click to keep an item.
 
 The **Collect** tab lists housing decor and cosmetics you learn by using them (ensembles, arsenals, illusions,
 appearance and customization unlocks) that you don't know yet. Click one: decor is added to your housing storage and
-a cosmetic is learned (it works like right-clicking the item, so it waits until you're out of combat). Ones in the
-bank or warband bank show on the **Bank** tab: click it (or **Move all**) to move it to your bags, then use it from the
-Collect tab. Right-click keeps an item in your bags. `/tw bags housing` and `/tw bags cosmetics` turn these off.
+a cosmetic is learned (it works like right-clicking the item, so it waits until you're out of combat).
+
+Wearable cosmetics ("Use: Add this appearance to your Warband collection") only count while you wear them. Their row
+says *wear once*: a click puts it on, and once the appearance is collected your own item goes back on by itself
+(`/tw bags swapback` does that by hand).
+
+Ones in the bank or warband bank show on the **Bank** tab: click it (or **Move all**) to move it to your bags, then use
+it from the Collect tab. Right-click keeps an item in your bags. `/tw bags housing` and `/tw bags cosmetics` turn these
+off.
 
 ## Opening bags and caches
 
@@ -92,6 +98,7 @@ disable it. **Keep both** stops the warning for that addon.
 | `/tw bags collect` | Show the Collect tab (`decor` works too) |
 | `/tw bags housing` | Turn on/off listing housing decor |
 | `/tw bags cosmetics` | Turn on/off listing cosmetics you learn by using them |
+| `/tw bags swapback` | Put your own gear back on after wearing a cosmetic to collect it |
 | `/tw bags open` | Show the Open tab |
 | `/tw bags containers` | Turn on/off listing things to open |
 | `/tw bags next` | Turn on/off loading the next item after you post |
