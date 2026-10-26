@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.9.0"
+ns.VERSION = "1.9.1"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -343,8 +343,10 @@ local function Scan(bank)
                         out.decor[#out.decor + 1] = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
                             count = info.stackCount or 1, price = 0, why = "housing decor" }
                     end
-                elseif name and Opt("cosmetic") and (equipLoc or "") == "" and IsCosmetic(bag, slot, info.itemID) then
-                    -- Cosmetics share the Collect (decor) tab: one click learns it.
+                elseif name and Opt("cosmetic") and ((equipLoc or "") == "" or UncollectedAppearance(link))
+                    and IsCosmetic(bag, slot, info.itemID) then
+                    -- Cosmetics share the Collect (decor) tab: one click learns it. Wearable ones ("Use: Add this
+                    -- appearance to your Warband collection") only while the appearance is still uncollected.
                     if not db.keep[info.itemID] then
                         out.decor[#out.decor + 1] = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
                             count = info.stackCount or 1, price = 0, why = "cosmetic - use it to learn it", cosmetic = true }
