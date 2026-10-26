@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.5.5"
+ns.VERSION = "1.5.6"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -133,6 +133,27 @@ local function NewRun(why)
     run = { started = time(), chambers = {}, masks = {}, spots = {}, quests = {}, notes = {} }
     db.run = run
     TW.Log("MAZE", "new Labyrinth run (%s)", why)
+end
+
+-- Inside / outside. A saved run only carries on when you never left it and were in it
+-- within the last 30 minutes (a /reload inside); anything else starts a new run.
+local STALE_RUN = 30 * 60
+local inside = false
+local function SetInside(now)
+    if now and not inside then
+        local fresh = run and not run.left and run.lastSeen and time() - run.lastSeen < STALE_RUN
+        if not fresh then NewRun(run and run.lastSeen and not run.left and "the saved run is over 30 minutes old"
+            or run and not run.lastSeen and "the saved run is from an older version" or "entered the Labyrinth") end
+        run.lastSeen = time()
+        if win then win:Show() end
+    elseif not now then
+        if inside and win then win:Hide() end
+        if run and run.lastSeen and not run.left then
+            run.left = true
+            TW.Log("MAZE", "left the Labyrinth")
+        end
+    end
+    inside = now
 end
 
 local function DoneCount()
@@ -977,7 +998,6 @@ end
 BINDING_HEADER_TIPPWORKSLABYRINTH = "Tippenhauer Works - Labyrinth"
 _G["BINDING_NAME_CLICK TippWorksLabyrinthKeeperButton:LeftButton"] = "Find the Keeper of the Key (target + skull + ping)"
 
-local inside = false
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("ADDON_LOADED")
 ev:SetScript("OnEvent", function(self, event, ...)
@@ -1020,7 +1040,11 @@ ev:SetScript("OnEvent", function(self, event, ...)
             "SCENARIO_CRITERIA_UPDATE", "SCENARIO_UPDATE", "UNIT_AURA", "QUEST_ACCEPTED", "QUEST_LOG_UPDATE", "QUEST_REMOVED",
             "CHAT_MSG_LOOT", "LOOT_OPENED", "BAG_UPDATE_DELAYED" }) do self:RegisterEvent(e) end
         C_Timer.NewTicker(1, function()
+            -- Entering or leaving without a loading-screen event we caught (PLAYER_ENTERING_WORLD can come
+            -- before the instance name is known).
+            if InLabyrinth() ~= inside then TW.Guard("maze where", SetInside, InLabyrinth()) end
             if not inside then return end
+            run.lastSeen = time()
             TW.Guard("maze scan", function()
                 MarkChamber(CurrentChamber(), "here", "entered")
                 CheckSealedRooms()
@@ -1033,15 +1057,7 @@ ev:SetScript("OnEvent", function(self, event, ...)
     end
     if event == "PLAYER_ENTERING_WORLD" then
         TW.Guard("maze quest log", ScanQuestLog)
-        local _, isReload = ...
-        local now = InLabyrinth()
-        if now and not inside then
-            if not isReload then NewRun("entered the Labyrinth") end
-            win:Show()
-        elseif not now and inside then
-            win:Hide()
-        end
-        inside = now
+        SetInside(InLabyrinth())
         return
     end
     -- Quests matter everywhere: you finish them outside the Labyrinth.

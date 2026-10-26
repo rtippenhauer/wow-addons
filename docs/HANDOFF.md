@@ -115,6 +115,9 @@ SavedVariables: `CoiledRareTrackerDB` (per character), `CoiledRareTrackerAccount
 - Escape (and closing the map with Escape) closes every frame in UISpecialFrames: the Labyrinth window opts out
   (`keepOnEscape`).
 - Pinging too often gives "You can't do that right now".
+- **PLAYER_ENTERING_WORLD can come before GetInstanceInfo names the Labyrinth** (Oct 26: entered at difficulty 0, no
+  new run; a /reload then kept the Oct 22 run, with its key holder). Since 1.5.6 a 1 s ticker also watches entering and
+  leaving, and a saved run only carries on if you never left it and it was seen within 30 minutes.
 - Curios party sync sends hundreds of found/looted messages in the Labyrinth; those are counted, not logged.
 
 ## Release routine (keep doing this)
