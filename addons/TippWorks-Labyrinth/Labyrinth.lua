@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.5.6"
+ns.VERSION = "1.5.7"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -245,6 +245,17 @@ local function MaskByName(text)
     end
 end
 
+-- A mask's power on a button (zone ability / extra action): its name or the mask's.
+local function MaskByAbility(text)
+    if type(text) ~= "string" then return end
+    local m = MaskByName(text)
+    if m then return m end
+    local t = text:lower()
+    for _, x in ipairs(MASKS) do
+        if t == x.what:lower() then return x end
+    end
+end
+
 ---------------------------------------------------------------------------
 -- Watching the game
 ---------------------------------------------------------------------------
@@ -295,6 +306,46 @@ local function CheckKey()
     end
 end
 
+-- Other places a mask can show: its item in your bags, its power on a zone-ability or
+-- extra action button. Every button seen is logged once per run to learn what the game uses.
+local function SpellName(id)
+    if not id then return nil end
+    local n = C_Spell and C_Spell.GetSpellName and Safe(C_Spell.GetSpellName, id)
+    return type(n) == "string" and n or nil
+end
+
+local function MaskSources()
+    local found = {}
+    for _, m in ipairs(MASKS) do
+        local n = (C_Item and C_Item.GetItemCount and Safe(C_Item.GetItemCount, m.name)) or 0
+        if n > 0 then found[#found + 1] = { m = m, how = "item in your bags" } end
+    end
+    if C_ZoneAbility and C_ZoneAbility.GetActiveAbilities then
+        local list = Safe(C_ZoneAbility.GetActiveAbilities)
+        for _, z in ipairs(type(list) == "table" and list or {}) do
+            local name = SpellName(z.spellID)
+            Note("zoneab:" .. tostring(z.spellID), "zone ability: %s (spell %s)", tostring(name), tostring(z.spellID))
+            local m = MaskByAbility(name)
+            if m then found[#found + 1] = { m = m, how = "zone ability: " .. name } end
+        end
+    end
+    if HasExtraActionBar and Safe(HasExtraActionBar) and GetActionInfo then
+        local slot = ExtraActionButton1 and ExtraActionButton1.action
+        local ok, kind, id = false, nil, nil
+        if slot then ok, kind, id = pcall(GetActionInfo, slot) end
+        if not ok or not Readable(kind) or not Readable(id) then kind, id = nil, nil end
+        local name = kind == "spell" and SpellName(id) or nil
+        Note("extra:" .. tostring(id), "extra action button: %s %s (%s)", tostring(kind), tostring(id), tostring(name))
+        local m = MaskByAbility(name)
+        if m then found[#found + 1] = { m = m, how = "extra action: " .. name } end
+    end
+    return found
+end
+
+local function CheckMaskSources()
+    for _, f in ipairs(MaskSources()) do MaskFound(f.m, f.how) end
+end
+
 -- Standing inside a Loa-sealed room (at its spot): it's open for you from now on.
 -- The locked room holds several Mislaid Curiosities, visible on the map
 -- through the closed door. 3+ curiosities (from TippWorks-Curios' list) inside
@@ -336,11 +387,12 @@ end
 
 local function ScanAuras()
     if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return end
-    local keyNow
+    local keyNow, secret = nil, 0
     for _, filter in ipairs({ "HELPFUL", "HARMFUL" }) do
         for i = 1, 40 do
             local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, filter)
             if not ok or type(a) ~= "table" then break end
+            if not Readable(a.name) then secret = secret + 1 end
             if Readable(a.name) and type(a.name) == "string" then
                 local lower = a.name:lower()
                 local m = MaskByName(a.name)
@@ -356,6 +408,7 @@ local function ScanAuras()
             end
         end
     end
+    if secret > 0 then Note("aurasecret", "%d of your auras have names hidden from addons", secret) end
     if keyNow and not run.keyBuff then
         run.keyBuff, run.hasKey = true, true
         Print("you have the |cffffd100key|r (" .. keyNow .. ")" .. (run.door and " - head for the locked door." or " - now find the locked door."))
@@ -921,6 +974,24 @@ local function Command(rest)
         db.hidePins = not db.hidePins or nil
         Print("chest pins on the Labyrinth map " .. (db.hidePins and "hidden." or "shown."))
         ns.DrawPins()
+    elseif sub == "probe" then
+        -- What the game shows that could be a mask (also in /tw log).
+        local function Out(fmt, ...) local t = fmt:format(...); Print(t); TW.Log("MAZE", "probe: %s", t) end
+        local names, secret = {}, 0
+        for _, filter in ipairs({ "HELPFUL", "HARMFUL" }) do
+            for i = 1, 40 do
+                local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, filter)
+                if not ok or type(a) ~= "table" then break end
+                if Readable(a.name) then names[#names + 1] = tostring(a.name) .. " (" .. tostring(a.spellId) .. ")" else secret = secret + 1 end
+            end
+        end
+        Out("your auras: %s%s", #names > 0 and table.concat(names, ", ") or "none readable", secret > 0 and (" + %d hidden"):format(secret) or "")
+        local found = MaskSources()
+        for _, f in ipairs(found) do Out("%s: %s", f.m.name, f.how) end
+        if #found == 0 then Out("no mask item, zone ability or extra action button found") end
+        local mine = {}
+        for k, v in pairs(run.masks) do mine[#mine + 1] = k .. " in " .. v end
+        Out("masks this run: %s", #mine > 0 and table.concat(mine, ", ") or "none")
     elseif sub == "where" then
         local c = CurrentChamber()
         Print(("sub-zone '%s', map '%s' -> chamber: %s"):format(tostring(Safe(GetSubZoneText)),
@@ -935,6 +1006,7 @@ module = TW.Register({
     help = {
         { "", "show/hide the Labyrinth window (opens by itself inside)" },
         { "where", "which chamber the addon thinks you're in" },
+        { "probe", "show what the game reports that could be a Hexmask (auras, buttons, items)" },
         { "spots", "the five mask/locked-room spots with coordinates" },
         { "chests", "open the Chests tab (Sturdy Chests, sealed rooms)" },
         { "door", "mark the locked door where you're standing (key icon on the map)" },
@@ -1048,6 +1120,7 @@ ev:SetScript("OnEvent", function(self, event, ...)
             TW.Guard("maze scan", function()
                 MarkChamber(CurrentChamber(), "here", "entered")
                 CheckSealedRooms()
+                CheckMaskSources()
                 CheckCuriosityCluster()
                 ScanMarkers()
                 ScanScenario()
