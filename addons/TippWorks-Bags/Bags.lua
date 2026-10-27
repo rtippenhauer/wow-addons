@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.10.1"
+ns.VERSION = "1.10.2"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -118,6 +118,30 @@ local function IsCosmetic(bag, slot)
         end
     end
     return cosmetic, useLine, uncollected
+end
+
+-- The item's tooltip lines (color codes stripped; hidden ones left out).
+local function TooltipLines(bag, slot)
+    local out = {}
+    if not (C_TooltipInfo and C_TooltipInfo.GetBagItem) then return out end
+    local ok, data = pcall(C_TooltipInfo.GetBagItem, bag, slot)
+    if not ok or type(data) ~= "table" or type(data.lines) ~= "table" then return out end
+    for _, line in ipairs(data.lines) do
+        local t = line.leftText
+        if type(t) == "string" and not (issecretvalue and issecretvalue(t)) then
+            out[#out + 1] = (t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
+        end
+    end
+    return out
+end
+
+-- Bags that open with a right-click but aren't flagged as holding loot: "<Right Click to Open>".
+local function RightClickToOpen(bag, slot)
+    local open = type(ITEM_OPENABLE) == "string" and ITEM_OPENABLE or "<Right Click to Open>"
+    for _, t in ipairs(TooltipLines(bag, slot)) do
+        if t == open then return true end
+    end
+    return false
 end
 
 -- Lockboxes say "Locked" on their tooltip until a rogue or a key opens them.
@@ -345,7 +369,7 @@ local function Scan(bank)
                             hideKey = hideKey, why = "caged pet" .. PetNote(have, limit),
                             market = prices.market, priceNote = prices.market and PriceNote(prices) }
                     end
-                elseif name and info.hasLoot and Opt("open") and not bank then
+                elseif name and Opt("open") and not bank and (info.hasLoot or RightClickToOpen(bag, slot)) then
                     -- Bags, caches and the like: the Open tab opens them one click at a time.
                     if not db.keep[info.itemID] and not LockedBox(bag, slot) then
                         out.open[#out.open + 1] = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
@@ -1065,7 +1089,8 @@ local function Command(rest)
         end
         local scan = Scan()
         local where
-        Out("opens for loot: %s", tostring(info.hasLoot))
+        Out("opens for loot: %s, <Right Click to Open>: %s", tostring(info.hasLoot), tostring(RightClickToOpen(found.bag, found.slot)))
+        Out("tooltip: %s", table.concat(TooltipLines(found.bag, found.slot), " / "))
         local cosmetic, useLine, uncollected = IsCosmetic(found.bag, found.slot)
         Out("slot %s, use line %s, cosmetic %s, tooltip says uncollected %s, API says uncollected %s, decor %s",
             tostring(equipLoc), useLine and ("\"" .. useLine .. "\"") or "none", tostring(cosmetic), tostring(uncollected),
