@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.10.0"
+ns.VERSION = "1.10.1"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -79,11 +79,12 @@ local function PetSpecies(itemID)
     local r = { pcall(C_PetJournal.GetPetInfoByItemID, itemID) }
     return r[1] and r[14] or nil -- 13th return value: speciesID
 end
--- Housing decor: using the item adds it to your housing storage.
+-- Housing decor: using the item adds it to your housing storage. The game's answer wins: other
+-- Housing-class items (dyes) can't be added that way. The item class only counts without that API.
 local function IsDecor(itemID, classID)
     if C_Item.IsDecorItem then
         local ok, v = pcall(C_Item.IsDecorItem, itemID)
-        if ok and v then return true end
+        if ok and v ~= nil and not (issecretvalue and issecretvalue(v)) then return v == true end
     end
     return Enum and Enum.ItemClass and Enum.ItemClass.Housing ~= nil and classID == Enum.ItemClass.Housing
 end
@@ -109,6 +110,7 @@ local function IsCosmetic(bag, slot)
             if t:sub(1, #use) == use then
                 useLine = t
                 local low = t:lower()
+                if low:find("dye", 1, true) then return false, useLine, uncollected end -- housing dyes aren't learned this way
                 for _, w in ipairs(COSMETIC_WORDS) do
                     if low:find(w, 1, true) then cosmetic = true end
                 end
