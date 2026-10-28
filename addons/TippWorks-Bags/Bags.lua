@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.10.2"
+ns.VERSION = "1.10.3"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -135,11 +135,14 @@ local function TooltipLines(bag, slot)
     return out
 end
 
--- Bags that open with a right-click but aren't flagged as holding loot: "<Right Click to Open>".
+-- Bags that open with a right-click but aren't flagged as holding loot: "<Right Click to Open>",
+-- or a use line like "Use: Open to gain some Gold." (Rattling Bag o' Gold).
 local function RightClickToOpen(bag, slot)
     local open = type(ITEM_OPENABLE) == "string" and ITEM_OPENABLE or "<Right Click to Open>"
+    local use = type(ITEM_SPELL_TRIGGER_ONUSE) == "string" and ITEM_SPELL_TRIGGER_ONUSE or "Use:"
     for _, t in ipairs(TooltipLines(bag, slot)) do
         if t == open then return true end
+        if t:sub(1, #use) == use and t:sub(#use + 1):match("^%s*Open[%s%.]") then return true end
     end
     return false
 end
@@ -1089,7 +1092,7 @@ local function Command(rest)
         end
         local scan = Scan()
         local where
-        Out("opens for loot: %s, <Right Click to Open>: %s", tostring(info.hasLoot), tostring(RightClickToOpen(found.bag, found.slot)))
+        Out("opens for loot: %s, opens by right-click: %s", tostring(info.hasLoot), tostring(RightClickToOpen(found.bag, found.slot)))
         Out("tooltip: %s", table.concat(TooltipLines(found.bag, found.slot), " / "))
         local cosmetic, useLine, uncollected = IsCosmetic(found.bag, found.slot)
         Out("slot %s, use line %s, cosmetic %s, tooltip says uncollected %s, API says uncollected %s, decor %s",
