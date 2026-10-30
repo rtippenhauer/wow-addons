@@ -9,6 +9,8 @@ The level 90 Season 2 weekly gearing checklist, plus today's Bountiful Delves, a
 - Vault delves (Tier 8+)
 - Manaflux charges and tier pieces
 - Orin's weekly Nebulous Voidcore
+- Ascendant Venomstones against the cap the game reports
+- Wah'du's weekly Labyrinth chamber quest, with your Mythical Soul Fragments (x/6 quests)
 
 You tick the rest yourself:
 - keyed Bountiful clears

@@ -19,6 +19,7 @@ local CURRENCY_NAMES = {
     marl = "Voidlight Marl",
     veteran = "Veteran Mistcrest",
     stash = "Gilded Stash",
+    venomstone = "Ascendant Venomstone",
 }
 
 local scanned = false -- one scan per session; a name that isn't a currency stays missing
@@ -79,6 +80,64 @@ local function TrackManaflux()
     if not info then return end
     if wk.lastManaflux and info.quantity < wk.lastManaflux then wk.checks.catalystUsed = true end
     wk.lastManaflux = info.quantity
+end
+
+-- Wah'du's weekly Labyrinth quest: a different chamber each week, named after
+-- it ("The Cave Towers" 98962, "Halazzi's Lair" 98963). Each turn-in gives a
+-- Mythical Soul Fragment (6 per character); 3 buy a Myth piece from Wah'du.
+local WAHDU_CHAMBERS = {
+    ["Chamber of Rites"] = true, ["The Reliquary"] = true, ["The Catacombs"] = true, ["Halazzi's Lair"] = true,
+    ["The Central Chamber"] = true, ["The Cave Towers"] = true, ["Jan'alai's Refuge"] = true,
+    ["Nalorakk's Rest"] = true, ["Akil'zon's Roost"] = true,
+}
+local WAHDU_FIRST, WAHDU_LAST = 98950, 98980
+local WAHDU_MAX = 6
+local SOUL_FRAGMENT = 285065
+local wahduIDs -- quest ids whose title is a chamber name
+
+local function WahduQuests()
+    if wahduIDs then return wahduIDs end
+    local found, pending = {}, false
+    for id = WAHDU_FIRST, WAHDU_LAST do
+        local title = C_QuestLog.GetTitleForQuestID(id)
+        if title and WAHDU_CHAMBERS[title] then found[#found + 1] = id
+        elseif not title then
+            pending = true
+            if C_QuestLog.RequestLoadQuestByID then C_QuestLog.RequestLoadQuestByID(id) end
+        end
+    end
+    if not pending then wahduIDs = found end -- titles not loaded yet: look again next refresh
+    return found
+end
+
+-- Completed so far, and the quest in your log (if any).
+local function WahduState()
+    local done, active = 0, nil
+    for _, id in ipairs(WahduQuests()) do
+        if C_QuestLog.IsQuestFlaggedCompleted(id) then done = done + 1
+        elseif C_QuestLog.GetLogIndexForQuestID(id) then active = C_QuestLog.GetTitleForQuestID(id) end
+    end
+    return done, active
+end
+
+-- This week's turn-in = the turn-in event, or more completed than when the
+-- week started (counted only once every quest title has loaded).
+local function TrackWahdu()
+    local done, active = WahduState()
+    if wahduIDs and (not wk.wahduStart or done < wk.wahduStart) then wk.wahduStart = done end
+    if active and wk.wahduQuest ~= active then
+        wk.wahduQuest = active
+        TW.Log("VAULT", "Wah'du's weekly quest in your log: %s", active)
+    end
+end
+
+function ns.QuestTurnedIn(id)
+    if not wk or type(id) ~= "number" or id < WAHDU_FIRST or id > WAHDU_LAST then return end
+    local title = C_QuestLog.GetTitleForQuestID(id) or "?"
+    if WAHDU_CHAMBERS[title] or title == "?" then
+        wk.checks.wahdu = true
+        TW.Log("VAULT", "Wah'du's weekly quest turned in: %s (%d), %d/%d done", title, id, WahduState(), WAHDU_MAX)
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -155,6 +214,33 @@ local function CatalystText()
     local charges = info and ("%d/8 charges"):format(info.quantity) or "? charges"
     local pieces = TierPieces()
     return ("%s  |cff888888tier %d/5|r"):format(charges, pieces), pieces >= 4
+end
+
+local function VenomstoneText()
+    local info = Currency("venomstone")
+    if not info then return end
+    local weekly, total = info.maxWeeklyQuantity or 0, info.maxQuantity or 0
+    local have = ("  |cff888888(%d to spend)|r"):format(info.quantity)
+    if weekly > 0 then
+        local n = info.quantityEarnedThisWeek or 0
+        return ("%d/%d this week%s"):format(n, weekly, have), n >= weekly
+    end
+    if total > 0 then
+        local n = info.useTotalEarnedForMaxQty and (info.totalEarned or 0) or info.quantity
+        return ("%d/%d%s"):format(n, total, have), n >= total
+    end
+    return ("%d |cff888888(no cap from the game)|r"):format(info.quantity), false
+end
+
+local function WahduText()
+    local done, active = WahduState()
+    local count = C_Item.GetItemCount or GetItemCount
+    local frags = count and count(SOUL_FRAGMENT, true) or 0
+    local extra = ("  |cff888888%d/%d quests, %d fragment%s|r"):format(done, WAHDU_MAX, frags, frags == 1 and "" or "s")
+    if done >= WAHDU_MAX then return "|cff33ff33all done|r" .. extra, true end
+    if wk.checks.wahdu or (wk.wahduStart and done > wk.wahduStart) then return "|cff33ff33done|r" .. extra, true end
+    if active then return "|cffffd100" .. active .. "|r" .. extra, false end
+    return "see Wah'du" .. extra, false
 end
 
 -- Nebulous Voidcore has a season cap that grows each week; "at cap" means
@@ -250,6 +336,15 @@ local ITEMS = {
               "'Umbral Blessings of the Catalyst'.",
               "Read from the Nebulous Voidcore season cap: at cap = this week's core is yours.",
               "Right-click: mark bought.  Shift-right-click: toggle 'warband unlocked'." } },
+    { key = "venomstone", label = "Ascendant Venomstones", kind = "auto", read = VenomstoneText,
+      tip = { "10 stones raise a capped weapon, trinket or neck one step.",
+              "From the raid, Nightmare Prey hunts and Restored Coffer Keys.",
+              "Shows the cap the game reports: this week's when there is one, else the total." } },
+    { key = "wahdu", label = "Wah'du's weekly chamber", kind = "auto", read = WahduText,
+      tip = { "Wah'du (Labyrinth entrance) asks for one chamber each week, Tier 8+.",
+              "Each turn-in: 1 Mythical Soul Fragment + 2,000 Undercoin, 6 per character.",
+              "Trade 3 fragments to Wah'du for a Myth piece in the slot you pick.",
+              "Missed weeks can be caught up." } },
     { key = "bountiful", label = "Keyed Bountiful clears", kind = "count",
       tip = { "Spend Restored Coffer Keys on Bountiful Coffers.",
               "A key opens the coffer - not needed for entry or Vault credit.",
@@ -382,6 +477,7 @@ function ns.RefreshWeekly()
     CheckWeek()
     TrackShards()
     TrackManaflux()
+    TrackWahdu()
     if not page or not page:IsShown() then return end
     local done = 0
     for _, b in ipairs(rows) do

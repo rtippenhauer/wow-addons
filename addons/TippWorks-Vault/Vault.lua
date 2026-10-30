@@ -6,7 +6,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.0"
+ns.VERSION = "1.1.0"
 ns.WIDTH = 350
 ns.Print = TW.Printer("Vault")
 ns.Log = TW.Log
@@ -138,7 +138,9 @@ ev:SetScript("OnEvent", function(self, event, name)
         self:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
         self:RegisterEvent("WEEKLY_REWARDS_UPDATE")
         self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+        self:RegisterEvent("QUEST_TURNED_IN")
     else
+        if event == "QUEST_TURNED_IN" then TW.Guard("vault quest", ns.QuestTurnedIn, name) end
         -- Also tracks shard gains and catalyst charges while the window is closed.
         TW.Guard("vault " .. event, ns.RefreshWeekly)
     end
