@@ -12,6 +12,10 @@ For the Labyrinth of Kindo'jan, the 12.1.5 mega-delve. The window opens by itsel
   run earns *Happy Hexmask Collector*. The five chambers marked * are the spots that can hold a mask
   or the locked room (from Journey rank 2): Chamber of Rites, The Cave Towers, Akil'zon's Roost,
   Jan'alai's Refuge and Nalorakk's Rest.
+  Each mask goes only to the player who takes it, so the addon tells your group when you find one, and asks
+  for theirs when you enter. Everyone needs Labyrinth 1.6.0 or later for the whole group's masks to count.
+  Once three masks and the empty room are known (right-click a starred room to mark it empty), the fifth
+  is the locked room.
 - **Find the Keeper:** the game hides the **Keeper of the Key** from addons, so, like Dundun, he's found with a
   macro. Bind **Find the Keeper of the Key** (Options > Keybindings > AddOns > Tippenhauer Works - Labyrinth),
   or make a macro with `/click TippWorksLabyrinthKeeperButton`. Press it in each chamber before moving on: it

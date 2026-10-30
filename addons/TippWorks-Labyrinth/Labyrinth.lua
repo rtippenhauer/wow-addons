@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.5.7"
+ns.VERSION = "1.6.0"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -127,6 +127,17 @@ local function CurrentChamber()
 end
 
 ---------------------------------------------------------------------------
+-- Group sync: a Hexmask goes only to the player who takes it (Oct 29: Bill
+-- got Fiery, Terry Frozen, Rob Thundering), so each finder tells the group.
+-- "M|<mask key>|<room>" = I found this mask; "A" = tell me yours (on entering).
+---------------------------------------------------------------------------
+local PREFIX = "TWMaze"
+local function Send(msg)
+    local ch = IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and "INSTANCE_CHAT" or IsInGroup() and "PARTY"
+    if ch and C_ChatInfo and C_ChatInfo.SendAddonMessage then pcall(C_ChatInfo.SendAddonMessage, PREFIX, msg, ch) end
+end
+
+---------------------------------------------------------------------------
 -- Run state (one per entry; chamber progress doesn't carry over)
 ---------------------------------------------------------------------------
 local function NewRun(why)
@@ -146,6 +157,7 @@ local function SetInside(now)
             or run and not run.lastSeen and "the saved run is from an older version" or "entered the Labyrinth") end
         run.lastSeen = time()
         if win then win:Show() end
+        C_Timer.After(5, function() Send("A") end) -- masks your group already has
     elseif not now then
         if inside and win then win:Hide() end
         if run and run.lastSeen and not run.left then
@@ -220,20 +232,33 @@ local function HiddenHere()
     return p and NearestHidden(p.x, p.y)
 end
 
-local function MaskFound(m, how)
+local function HiddenNamed(name)
+    for _, c in ipairs(HIDDEN) do if c.name == name then return c end end
+end
+
+local LockedByElimination
+-- who = the party member who found it (from their addon); nil = you.
+local function MaskFound(m, how, sharedRoom, who)
     if run.masks[m.key] then return end
-    local room = HiddenHere()
+    local room
+    if who then room = sharedRoom and HiddenNamed(sharedRoom) else room = HiddenHere() end
     if room then
         run.rooms = run.rooms or {}
         run.rooms[room.name] = m.name
     end
-    local c = room or CurrentChamber()
-    run.masks[m.key] = c and c.name or "?"
-    if c then run.spots[c.name] = m.name end
-    TW.Log("MAZE", "%s found in %s (%s)", m.name, c and c.name or "an unknown chamber", how)
+    local where = room and room.name or (who and sharedRoom) or (not who and CurrentChamber() or {}).name
+    run.masks[m.key] = where or "?"
+    if where then run.spots[where] = m.name end
+    if not who then
+        run.myMasks = run.myMasks or {}
+        run.myMasks[m.key] = where or "?"
+        Send("M|" .. m.key .. "|" .. (where or "?"))
+    end
+    TW.Log("MAZE", "%s found in %s (%s)", m.name, where or "an unknown chamber", how)
+    LockedByElimination()
     local n = 0
     for _ in pairs(run.masks) do n = n + 1 end
-    Print(("%s found (%d/3)%s"):format(m.name, n, n == 3 and " - all three: Happy Hexmask Collector!" or ""))
+    Print(("%s found%s (%d/3)%s"):format(m.name, who and (" by " .. who) or "", n, n == 3 and " - all three: Happy Hexmask Collector!" or ""))
     ns.Refresh()
 end
 
@@ -346,32 +371,39 @@ local function CheckMaskSources()
     for _, f in ipairs(MaskSources()) do MaskFound(f.m, f.how) end
 end
 
--- Standing inside a Loa-sealed room (at its spot): it's open for you from now on.
--- The locked room holds several Mislaid Curiosities, visible on the map
--- through the closed door. 3+ curiosities (from TippWorks-Curios' list) inside
--- an unresolved hidden room = that's the locked room, before its door is seen.
-local LOCKED_CLUSTER = 3
-local function CheckCuriosityCluster()
-    local cr = TippWorksCuriosDB and TippWorksCuriosDB.curioRun
-    if type(cr) ~= "table" or type(cr.items) ~= "table" then return end
+-- Three masks and the empty room known: the fifth hidden room is the locked one.
+-- (A guess from Mislaid Curiosities near a spot was wrong twice on Oct 29: the
+-- start room and Nalorakk's Rest have curiosities in the open near theirs.)
+function LockedByElimination()
     run.rooms = run.rooms or {}
+    local open
     for _, c in ipairs(HIDDEN) do
         if not run.rooms[c.name] then
-            local n = 0
-            for _, it in pairs(cr.items) do
-                if type(it) == "table" and it.map == MAZE_MAP and it.kind ~= "Dundun" and type(it.x) == "number"
-                    and math.sqrt((it.x - c.spot[1] / 100) ^ 2 + (it.y - c.spot[2] / 100) ^ 2) <= SPOT_RANGE then
-                    n = n + 1
-                end
-            end
-            if n >= LOCKED_CLUSTER and MarkLocked(c, n .. " curiosities behind one door") then
-                Print(("|cffffd100%s|r looks like this run's locked room (%d curiosities inside) - key icon on the map; find the Keeper of the Key."):format(c.name, n))
-                ns.Refresh()
-            end
+            if open then return end
+            open = c
+        end
+    end
+    if open and MarkLocked(open, "the other four hold masks or are empty") then
+        Print(("|cffffd100%s|r must be this run's locked room - the other four are known."):format(open.name))
+        ns.Refresh()
+    end
+end
+
+local function OnMazeMessage(prefix, msg, _, sender)
+    if prefix ~= PREFIX or not (inside and run) or not (Readable(msg) and Readable(sender)) then return end
+    local who = Ambiguate(sender, "short")
+    if who == UnitName("player") then return end
+    local tag, key, room = strsplit("|", msg, 3)
+    if tag == "A" then
+        for k, r in pairs(run.myMasks or {}) do Send("M|" .. k .. "|" .. r) end
+    elseif tag == "M" then
+        for _, m in ipairs(MASKS) do
+            if m.key == key then MaskFound(m, "shared by " .. who, room ~= "?" and room or nil, who) end
         end
     end
 end
 
+-- Standing inside a Loa-sealed room (at its spot): it's open for you from now on.
 local function CheckSealedRooms()
     local p = C_Map.GetPlayerMapPosition(MAZE_MAP, "player")
     if not p then return end
@@ -729,6 +761,7 @@ local function Row(i)
             run.rooms = run.rooms or {}
             run.rooms[e.hidden.name] = (run.rooms[e.hidden.name] == nil) and "empty" or nil
             TW.Log("MAZE", "hidden room %s marked %s by hand", e.hidden.name, run.rooms[e.hidden.name] or "not checked")
+            LockedByElimination()
             ns.Refresh()
         elseif e.hidden then
             ns.GuideTo(e.hidden.name .. " - hidden room", e.hidden.spot[1], e.hidden.spot[2])
@@ -1110,7 +1143,8 @@ ev:SetScript("OnEvent", function(self, event, ...)
         CreateWindow()
         for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA",
             "SCENARIO_CRITERIA_UPDATE", "SCENARIO_UPDATE", "UNIT_AURA", "QUEST_ACCEPTED", "QUEST_LOG_UPDATE", "QUEST_REMOVED",
-            "CHAT_MSG_LOOT", "LOOT_OPENED", "BAG_UPDATE_DELAYED" }) do self:RegisterEvent(e) end
+            "CHAT_MSG_LOOT", "LOOT_OPENED", "BAG_UPDATE_DELAYED", "CHAT_MSG_ADDON" }) do self:RegisterEvent(e) end
+        if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then C_ChatInfo.RegisterAddonMessagePrefix(PREFIX) end
         C_Timer.NewTicker(1, function()
             -- Entering or leaving without a loading-screen event we caught (PLAYER_ENTERING_WORLD can come
             -- before the instance name is known).
@@ -1121,7 +1155,6 @@ ev:SetScript("OnEvent", function(self, event, ...)
                 MarkChamber(CurrentChamber(), "here", "entered")
                 CheckSealedRooms()
                 CheckMaskSources()
-                CheckCuriosityCluster()
                 ScanMarkers()
                 ScanScenario()
             end)
@@ -1141,7 +1174,9 @@ ev:SetScript("OnEvent", function(self, event, ...)
         return
     end
     if not inside or not run then return end
-    if event:find("^ZONE_CHANGED") then
+    if event == "CHAT_MSG_ADDON" then
+        TW.Guard("maze sync", OnMazeMessage, ...)
+    elseif event:find("^ZONE_CHANGED") then
         local c = CurrentChamber()
         Note("zone:" .. tostring(Safe(GetSubZoneText)), "sub-zone: '%s' -> %s", tostring(Safe(GetSubZoneText)), c and c.name or "not a known chamber")
         TW.Guard("maze zone", MarkChamber, c, "here", "entered")
