@@ -1,40 +1,27 @@
 # Tippenhauer Works WoW addons — notes for Claude
 
-Retail WoW (Midnight 12.x) addons by rtippenhauer (Rob). Repo: https://github.com/rtippenhauer/wow-addons.
-Played with Terry and Bill. Read `docs/HANDOFF.md` before touching Lua: it holds
-the hard-won in-game facts (secret values, secure buttons in combat, delve quirks).
+Retail WoW (Midnight 12.x) addons by rtippenhauer (Rob), played with Terry and Bill.
+Read `docs/HANDOFF.md` before touching Lua: hard-won in-game facts (secret values, secure buttons in combat, delve quirks).
 
-## Layout
-- `addons/<Folder>/` — one folder per addon, each with `<Folder>.toc`. The updater installs every such folder.
-- `tools/Update-WowAddons.ps1` — pull + backup + replace into AddOns. Must stay **Windows PowerShell 5.1**
-  compatible and ASCII-only (Bill runs it with no extra tooling). `Update-WowAddons.cmd` wraps it.
-- `tools/migrations.json` — one-time folder renames (`{from, to}`): saved data is copied, old folder removed.
-- `install.settings.json` — per machine, gitignored. Template: `install.settings.example.json`.
-- `.claude/skills/install-wow-addon/` — the `/install-wow-addon` skill shared by Rob and Terry.
-
-## Addons
-TippWorks-Core (shared `TippWorks` global: log, Guard/Safe, module registry + `/tw`, launcher, `TW.CreateWindow`,
-delve travel in Atlas.lua), -Calls, -Curios, -Vault, -Rares, -Labyrinth, -Bags. Rares keeps CoiledRareTracker's SavedVariables names
-(`CoiledRareTrackerDB`, `CoiledRareTrackerAccountDB`) and the target button's global name (key binding); the
-other addons copy their old settings from those once (`db.migrated`), so they list TippWorks-Rares and
-CoiledRareTracker in `## OptionalDeps`.
+## Constraints
+- `tools/Update-WowAddons.ps1` must stay Windows PowerShell 5.1 compatible and ASCII-only (Bill runs it with no extra tooling).
+- `tools/migrations.json`: one-time folder renames `{from, to}`; saved data is copied, the old folder removed.
+- `install.settings.json` is per machine and gitignored (template: `install.settings.example.json`).
+- TippWorks-Rares keeps CoiledRareTracker's SavedVariables (`CoiledRareTrackerDB`, `CoiledRareTrackerAccountDB`) and its
+  target button's global name (key binding). Other addons copy old settings from those once (`db.migrated`), so they list
+  TippWorks-Rares and CoiledRareTracker in `## OptionalDeps`.
+- Never edit addons on Terry's or Bill's machines. To Terry's session, send only the update notice, never code.
 
 ## Brand conventions
-- Folders `TippWorks-<Name>`. Lua globals and SavedVariables use `TippWorks<Name>` (no hyphen).
+- Folders `TippWorks-<Name>`; Lua globals and SavedVariables `TippWorks<Name>` (no hyphen).
 - `.toc`: `## Title: |cff<accent>Tippenhauer Works|r · <Name>`, `## Author: rtippenhauer (Tippenhauer Works)`,
-  `## X-Website: https://github.com/rtippenhauer/wow-addons`, `## Category: Tippenhauer Works`,
-  `## Group: TippWorks-Core`, and `## Dependencies: TippWorks-Core` for everything except Core.
-- Slash commands: `/tw <feature> ...`, plus `/tw help`. Each addon has a README.md with its command table.
-- One minimap launcher button (TippWorks-Core), plus an AddOns compartment entry per addon.
+  `## X-Website: https://github.com/rtippenhauer/wow-addons`, `## Category: Tippenhauer Works`, `## Group: TippWorks-Core`,
+  and `## Dependencies: TippWorks-Core` for everything except Core.
+- Slash commands are `/tw <feature> ...` plus `/tw help`; each addon's README.md has its command table.
+- One minimap launcher (Core), plus an AddOns compartment entry per addon.
 
-## Release routine
-Claude cannot run WoW. Every change is syntax-checked here and then verified in game by Rob.
-1. Change the code. Syntax-check every changed .lua (Lua 5.1 parser, e.g. `npx luaparse`).
-2. Bump the version in **both** the addon's `.toc` (`## Version`) and its `ns.VERSION`.
-3. Optionally test locally: `/install-wow-addon --local` (runs the updater with `-NoPull`). Before a patch,
-   try it on the PTR with `/install-wow-addon --local --ptr` (`-Flavor ptr`). Add the PTR's interface number
-   to each `.toc` `## Interface:` line so WoW doesn't list the addon as out of date.
-4. Commit and push to `main`. The updater tells each player whether `/reload` is enough or a restart is needed.
-5. Offer to tell Terry's session (ListAgents / SendMessage): "TippWorks update pushed: <addons/versions>,
-   run /install-wow-addon". Send only that notice, never code. Bill updates himself with `Update-WowAddons.cmd`.
-6. Never edit addons on Terry's or Bill's machines. The updater refuses to pull over local edits.
+## Every change
+- Claude cannot run WoW: syntax-check every changed .lua with a Lua 5.1 parser; Rob verifies in game.
+- Bump the version in both the `.toc` (`## Version`) and `ns.VERSION` (Core: `TW.VERSION` in Core.lua).
+- Release steps (install, PTR, push, notify Terry): `/release`, see `.claude/commands/release.md`.
+- Before reading a file over 300 lines, grep or Read with offset/limit; never load whole large files into context.
