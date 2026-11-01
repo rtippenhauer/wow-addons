@@ -192,6 +192,34 @@ local function DelvesVault()
     end
     local top = acts[#acts]
     local done = top and (top.progress or 0) >= top.threshold and (top.level or 0) >= 8
+    -- The goal is 8 activities at Tier 8+: a lower one counts toward the 8 but sets the third
+    -- choice's level (the lowest of your top 8). Per tier, as in the vault's own tooltip.
+    local high, byTier
+    local sorted = C_WeeklyRewards.GetSortedProgressForActivity
+        and TW.Safe(C_WeeklyRewards.GetSortedProgressForActivity, Enum.WeeklyRewardChestThresholdType.World, false)
+    if type(sorted) == "table" then
+        high, byTier = 0, {}
+        for _, p in ipairs(sorted) do
+            if (p.difficulty or 0) >= 8 then high = high + (p.numPoints or 0) end
+            byTier[#byTier + 1] = ("T%s x%s"):format(tostring(p.difficulty), tostring(p.numPoints))
+        end
+        byTier = table.concat(byTier, ", ")
+        if wk and wk.vaultTiers ~= byTier then
+            wk.vaultTiers = byTier
+            ns.Log("VAULT", "vault activities by tier: %s", byTier ~= "" and byTier or "none")
+        end
+    else
+        -- Without the per-tier list: the biggest unlocked slot at T8+ means at least that many.
+        high = 0
+        for _, a in ipairs(acts) do
+            if (a.progress or 0) >= a.threshold and (a.level or 0) >= 8 then high = a.threshold end
+        end
+        high = high > 0 and high or nil
+    end
+    if high then
+        return ("%s%d/8 at T8+  |cff888888%d total, slots %s|r"):format(type(sorted) == "table" and "" or ">=",
+            math.min(high, 8), math.min(progress, 8), table.concat(tiers, " ")), done or high >= 8
+    end
     return ("%d/8  |cff888888slots %s|r"):format(math.min(progress, 8), table.concat(tiers, " ")), done
 end
 
@@ -320,6 +348,7 @@ local ITEMS = {
       fallbackCount = 8,
       tip = { "2 / 4 / 8 delves unlock 1 / 2 / 3 Vault choices for next week.",
               "Eight Tier 8+ runs = three 305 Hero 1/6 choices.",
+              "A lower tier (or a world activity) counts toward 8 but sets the third choice's level: it uses the lowest of your top 8.",
               "Normal delves count - no Bountiful or key needed for Vault credit.",
               "If T11 is reliable: 4 Tier 11 clears for Gilded Stashes, rest at T8+." } },
     { key = "catalyst", label = "Use the Manaflux (Catalyst)", kind = "auto", read = CatalystText, manual = true,
