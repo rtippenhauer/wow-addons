@@ -12,4 +12,7 @@ Release the current TippWorks addon changes.
 3. Commit and push to `main`. The updater tells each player whether `/reload` is enough or a restart is needed.
 4. Offer to tell Terry's session (ListAgents / SendMessage): "TippWorks update pushed: <addons/versions>, run
    /install-wow-addon". Send only that notice, never code. Bill updates himself with `Update-WowAddons.cmd`.
+   When Terry's session confirms the install, send one acknowledgment ("Confirmation received: <addons/versions>
+   installed, Terry is current. No reply needed.") and treat the exchange as closed. Don't wait for or expect a reply:
+   if its confirmation arrived, assume it gets the acknowledgment.
 5. The updater refuses to pull over local edits on a player's machine; never edit addons there.

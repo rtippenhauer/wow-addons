@@ -10,7 +10,8 @@ Read `docs/HANDOFF.md` before touching Lua: hard-won in-game facts (secret value
 - TippWorks-Rares keeps CoiledRareTracker's SavedVariables (`CoiledRareTrackerDB`, `CoiledRareTrackerAccountDB`) and its
   target button's global name (key binding). Other addons copy old settings from those once (`db.migrated`), so they list
   TippWorks-Rares and CoiledRareTracker in `## OptionalDeps`.
-- Never edit addons on Terry's or Bill's machines. To Terry's session, send only the update notice, never code.
+- Never edit addons on Terry's or Bill's machines. To Terry's session, send only the update notice and the
+  acknowledgment of its install confirmation (see `/release`), never code.
 
 ## Brand conventions
 - Folders `TippWorks-<Name>`; Lua globals and SavedVariables `TippWorks<Name>` (no hyphen).
