@@ -6,7 +6,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.1.0"
+ns.VERSION = "1.2.0"
 ns.WIDTH = 350
 ns.Print = TW.Printer("Vault")
 ns.Log = TW.Log
@@ -30,6 +30,18 @@ local function CreateWindow()
         width = ns.WIDTH, db = ns.db, tabs = TABS, onTab = ShowTab })
     win.weekly = ns.CreateWeeklyPage(win, win.top)
     win.bountiful = ns.CreateBountifulPage(win, win.top)
+    local gear = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
+    gear:SetSize(46, 18)
+    gear:SetPoint("TOPRIGHT", -64, -9)
+    gear:SetText("Gear")
+    gear:SetScript("OnClick", ns.ShowGear)
+    gear:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Gear export")
+        GameTooltip:AddLine("Your spec, gear, bags, bank gear, Great Vault and currencies as text to paste into ChatGPT.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    gear:SetScript("OnLeave", GameTooltip_Hide)
     win:SelectTab(ns.db.tab == "bountiful" and "bountiful" or "weekly")
     win:SetScript("OnShow", function() ShowTab(ns.db.tab or "weekly") end)
     -- Distances, currencies and the vault change while it's open.
@@ -80,6 +92,7 @@ local function Command(rest)
     if sub == "" or sub == "show" or sub == "toggle" then Toggle()
     elseif sub == "weekly" or sub == "bountiful" then Toggle(true, sub)
     elseif sub == "stash" then StashReport()
+    elseif sub == "gear" then ns.ShowGear()
     else TW.ModuleHelp(module) end
 end
 
@@ -92,10 +105,12 @@ module = TW.Register({
         { "weekly", "open the Weekly tab" },
         { "bountiful", "open the Bountiful tab (today's Bountiful Delves)" },
         { "stash", "show where the game reports the Gilded Stash count" },
+        { "gear", "gear export: spec, gear, bags, bank gear, vault, currencies as text for ChatGPT" },
     },
 })
 -- /tw weekly and /tw bountiful: open that tab.
 TW.modules.weekly = setmetatable({ command = function(rest) if rest == "" then Toggle(true, "weekly") else Command(rest) end end }, { __index = module })
+TW.modules.gear = setmetatable({ command = function() ns.ShowGear() end }, { __index = module })
 TW.modules.bountiful = setmetatable({ command = function(rest) if rest == "" then Toggle(true, "bountiful") else Command(rest) end end }, { __index = module })
 
 function TippWorksVault_OnAddonCompartmentClick(_, button) Toggle(nil, button == "RightButton" and "bountiful" or nil) end

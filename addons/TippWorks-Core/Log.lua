@@ -32,7 +32,9 @@ function TW.Guard(where, fn, ...)
 end
 
 local viewer
-local function ShowLog()
+-- A movable box of selected text to copy out of the game (Ctrl+C).
+-- toEnd: scroll to the bottom (the log's newest lines).
+function TW.ShowText(heading, text, toEnd)
     if not viewer then
         viewer = CreateFrame("Frame", "TippWorksLog", UIParent, "BackdropTemplate")
         viewer:SetSize(620, 380)
@@ -51,7 +53,7 @@ local function ShowLog()
         viewer:SetScript("OnDragStop", viewer.StopMovingOrSizing)
         local title = viewer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         title:SetPoint("TOPLEFT", 12, -10)
-        title:SetText("Tippenhauer Works log  |cff888888(Ctrl+A, Ctrl+C to copy)|r")
+        viewer.title = title
         local close = CreateFrame("Button", nil, viewer, "UIPanelCloseButton")
         close:SetPoint("TOPRIGHT", 2, 2)
         local scroll = CreateFrame("ScrollFrame", nil, viewer, "UIPanelScrollFrameTemplate")
@@ -66,12 +68,19 @@ local function ShowLog()
         scroll:SetScrollChild(edit)
         viewer.edit, viewer.scroll = edit, scroll
     end
-    local log = Store()
-    viewer.edit:SetText(#log > 0 and table.concat(log, "\n") or "(nothing logged yet)")
+    viewer.title:SetText(heading .. "  |cff888888(Ctrl+A, Ctrl+C to copy)|r")
+    viewer.edit:SetText(text)
     viewer:Show()
     viewer.edit:HighlightText()
     viewer.edit:SetFocus()
-    C_Timer.After(0, function() viewer.scroll:SetVerticalScroll(viewer.scroll:GetVerticalScrollRange()) end)
+    C_Timer.After(0, function()
+        viewer.scroll:SetVerticalScroll(toEnd and viewer.scroll:GetVerticalScrollRange() or 0)
+    end)
+end
+
+local function ShowLog()
+    local log = Store()
+    TW.ShowText("Tippenhauer Works log", #log > 0 and table.concat(log, "\n") or "(nothing logged yet)", true)
 end
 
 function TW.LogCommand(arg)

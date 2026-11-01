@@ -28,6 +28,7 @@ directions, just like a Delver's Calls row.
 | `/tw vault` | Show or hide the window |
 | `/tw weekly` | Open the Weekly tab |
 | `/tw bountiful` | Open the Bountiful tab |
+| `/tw gear` (or the Gear button) | Gear export: spec, equipped gear, bags, bank and warband bank gear (saved when you open the bank), Great Vault and currencies as text to copy into ChatGPT |
 | `/tw vault stash` | Show where the game reports the Gilded Stash count (for bug reports) |
 
 In the AddOns menu, click opens the Weekly tab and right-click opens Bountiful.
