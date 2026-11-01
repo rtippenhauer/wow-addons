@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.13"
+ns.VERSION = "1.0.14"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -52,6 +52,23 @@ local IGNORED_VIGNETTES = { [6116] = true } -- Delver's Supplies
 -- Markers with no info that are known to be curiosities (seen in game: every
 -- 5482 sat exactly on a Mislaid Curiosity, The Darkway, Oct 12 2026).
 local VIGNETTE_KINDS = { [5482] = { "Curiosity", "Mislaid Curiosity" } }
+-- Except in the Labyrinth of Kindo'jan: there 5482 also marks something by the
+-- hidden Hexmask spots. It drifted around Chamber of Rites (49-51, 81-84, Nov 1
+-- 2026) and listed four curiosities that weren't there. Real curiosities there
+-- come with an object GUID, so those markers are ignored.
+local LABYRINTH_IGNORED = { [5482] = true }
+local function InLabyrinth()
+    local name = GetInstanceInfo()
+    return Readable(name) and type(name) == "string"
+        and (name:find("Labyrinth", 1, true) or name:find("Kindo", 1, true)) and true or false
+end
+local function Ignored(vid)
+    return vid and (IGNORED_VIGNETTES[vid] or LABYRINTH_IGNORED[vid] and InLabyrinth()) and true or false
+end
+-- A curiosity listed from such a marker (saved before 1.0.14, or sent by a party member on 1.0.13).
+local function LabyrinthGhost(key)
+    return InLabyrinth() and type(key) == "string" and key:find("^Mislaid Curiosity@") ~= nil
+end
 
 -- A Boon with no known curiosity nearby: the game never showed this one, so
 -- it's added where you stood, already picked up. Local only, never synced.
@@ -211,6 +228,25 @@ local function StartRunIfNeeded(fresh)
         ns.CompactCurioRun()
     end
     run.lastSeen = time()
+end
+
+-- Drop Labyrinth ghosts kept by a /reload: entries from a no-info marker that no real
+-- marker confirmed and nobody picked up. A real one is listed again when it's seen.
+local function DropLabyrinthGhosts()
+    if not (run and InLabyrinth()) then return end
+    local order, dropped = {}, 0
+    for _, k in ipairs(run.order) do
+        local it = run.items[k]
+        if LabyrinthGhost(k) and not it.confirmed and not next(it.looted or {}) then
+            run.items[k] = nil; dropped = dropped + 1
+        else
+            order[#order + 1] = k
+        end
+    end
+    if dropped == 0 then return end
+    run.order = order
+    for k, v in pairs(run.alias or {}) do if not run.items[v] then run.alias[k] = nil end end
+    ns.Log("CURIO", "removed %d curiosities that came from a Labyrinth marker that isn't one", dropped)
 end
 
 local MERGE_YARDS = 10
@@ -405,7 +441,7 @@ local function NoteUnnamed(vid, pos)
     if run.markers[k] then return end
     run.markers[k] = true
     ns.Log("MARKER", "<no info from the game> | vignette id %s | %.1f, %.1f | %s", tostring(vid), pos.x * 100, pos.y * 100,
-        IGNORED_VIGNETTES[vid] and "ignored" or ("listed as " .. (db.dundunVignettes[vid] and DUNDUN
+        Ignored(vid) and "ignored" or ("listed as " .. (db.dundunVignettes[vid] and DUNDUN
             or VIGNETTE_KINDS[vid] and VIGNETTE_KINDS[vid][2] or UNKNOWN_NAME)))
 end
 
@@ -437,7 +473,7 @@ function ns.CurioScanReport()
         else
             local vid = VignetteID(guid)
             Out(("  <no info from the game> | vignette id %s | %s | %s"):format(tostring(vid),
-                IGNORED_VIGNETTES[vid] and "ignored" or VIGNETTE_KINDS[vid] and ("tracked as " .. VIGNETTE_KINDS[vid][1]) or "listed as unnamed", where))
+                Ignored(vid) and "ignored" or VIGNETTE_KINDS[vid] and ("tracked as " .. VIGNETTE_KINDS[vid][1]) or "listed as unnamed", where))
         end
     end
 end
@@ -474,6 +510,7 @@ local function Scan()
         local ownGuid = not weak and not key:find("@", 1, true)
         local it, new = AddItem(key, kind, name, map, pos.x, pos.y, ownGuid)
         it.via = nil -- seen by this client, not only heard of from a party member
+        if not weak then it.confirmed = true end
         if weak and it.key ~= key then
             seen[it.key] = true
             return
@@ -507,7 +544,7 @@ local function Scan()
             if kind == DUNDUN then
                 -- Remember his marker id: it may come back later with no info.
                 local vid = VignetteID(guid)
-                if vid and not IGNORED_VIGNETTES[vid] and not db.dundunVignettes[vid] then
+                if vid and not Ignored(vid) and not db.dundunVignettes[vid] then
                     db.dundunVignettes[vid] = true
                     ns.Log("DUNDUN", "his map marker is vignette id %d (remembered)", vid)
                 end
@@ -523,12 +560,12 @@ local function Scan()
             -- WoW reports something here but says nothing about it.
             local vid = VignetteID(guid)
             NoteUnnamed(vid, pos)
-            local known = VIGNETTE_KINDS[vid]
+            local known = not Ignored(vid) and VIGNETTE_KINDS[vid]
             if vid and db.dundunVignettes[vid] then
                 Track("dundun", DUNDUN, DUNDUN, pos)
             elseif known then
                 Track(("%s@%.3f,%.3f"):format(known[2], pos.x, pos.y), known[1], known[2], pos, true)
-            elseif not IGNORED_VIGNETTES[vid] then
+            elseif not Ignored(vid) then
                 Track(("unnamed@%.3f,%.3f"):format(pos.x, pos.y), UNKNOWN, UNKNOWN_NAME, pos, true)
             end
         end
@@ -1146,6 +1183,7 @@ local function Enter(fresh)
     ns.Log("CURIO", "entered delve %s (type %s, difficulty %s), group: %s%s", tostring(name), tostring(instType),
         tostring(diff), IsInGroup() and (Channel() or "?") or "solo", fresh and "" or " (after /reload - keeping the list)")
     StartRunIfNeeded(fresh)
+    DropLabyrinthGhosts()
     ns.ApplyPendingDundun()
     if not frame:IsShown() then frame:Show() end
     Broadcast("H|" .. ns.VERSION)
@@ -1219,6 +1257,7 @@ local function OnAddonMessage(prefix, msg, _, sender)
     end
     x, y, map = tonumber(x), tonumber(y), tonumber(map)
     if not (key and x and y and map) then return end
+    if LabyrinthGhost(key) then return end
     local it, new = AddItem(key, kind, name, map, x, y)
     if new then it.via = who end
     if tag == "L" then MarkLooted(it, who, true) else ns.RefreshCurios() end
