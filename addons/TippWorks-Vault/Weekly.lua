@@ -216,9 +216,20 @@ local function DelvesVault()
         end
         high = high > 0 and high or nil
     end
-    if high then
-        return ("%s%d/8 at T8+  |cff888888%d total, slots %s|r"):format(type(sorted) == "table" and "" or ">=",
-            math.min(high, 8), math.min(progress, 8), table.concat(tiers, " ")), done or high >= 8
+    if high and type(sorted) == "table" then
+        -- The game labelling the third choice T8+ with fewer than 8 runs at T8+: the label is wrong (or the
+        -- game counts differently than its tooltip says). Flagged on the row and logged once a week.
+        local mismatch = done and high < 8
+        if mismatch and wk and not wk.vaultMismatch then
+            wk.vaultMismatch = true
+            ns.Log("VAULT", "the game shows the third vault choice at T%s, but only %d activities are T8+ (%s)",
+                tostring(top.level), high, byTier)
+        end
+        return ("%d/8 at T8+  |cff888888%d total, slots %s|r%s"):format(math.min(high, 8), math.min(progress, 8),
+            table.concat(tiers, " "), mismatch and "  |cffff6060third choice is NOT T8 - check it|r" or ""), high >= 8
+    elseif high then
+        return (">=%d/8 at T8+  |cff888888%d total, slots %s|r"):format(math.min(high, 8), math.min(progress, 8),
+            table.concat(tiers, " ")), done
     end
     return ("%d/8  |cff888888slots %s|r"):format(math.min(progress, 8), table.concat(tiers, " ")), done
 end
