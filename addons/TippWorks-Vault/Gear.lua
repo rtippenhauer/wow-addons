@@ -243,7 +243,7 @@ local function Currencies(out)
     end
 end
 
-function ns.GearReport()
+local function GearLines()
     local out = {
         ("# World of Warcraft character export (%s, TippWorks-Vault %s)"):format(date("%Y-%m-%d"), ns.VERSION),
         "Retail WoW, Midnight. Please suggest my best gear upgrades and what to spend currencies on.",
@@ -255,14 +255,20 @@ function ns.GearReport()
     Bank(out)
     Vault(out)
     Currencies(out)
-    return table.concat(out, "\n")
+    return out
 end
+
+function ns.GearReport() return table.concat(GearLines(), "\n") end
 
 function ns.ShowGear()
     if InCombatLockdown() then ns.Print("leave combat first.") return end
     TW.Guard("gear export", function()
-        local text = ns.GearReport()
-        TW.Log("VAULT", "gear export made (%d lines)", select(2, text:gsub("\n", "")) + 1)
-        TW.ShowText("Gear export - paste into ChatGPT", text)
+        local lines = GearLines()
+        -- Too long to copy in one go, so it's saved too: Export-Gear.cmd (in the wow-addons folder) writes it
+        -- to a text file once WoW has saved it (on /reload or logout).
+        ns.db.gearExport = { at = date("%Y-%m-%d %H:%M"), lines = lines }
+        TW.Log("VAULT", "gear export made (%d lines)", #lines)
+        TW.ShowText("Gear export - paste into ChatGPT", table.concat(lines, "\n"))
+        ns.Print("saved for a file too: /reload (or log out), then run Export-Gear.cmd in your wow-addons folder.")
     end)
 end

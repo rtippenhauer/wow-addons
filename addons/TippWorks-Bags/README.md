@@ -51,6 +51,10 @@ buy from your bags, so items to sell say *to bags*: click one (or **Move all**) 
 vendor. WoW only deletes from your bags, so clicking an item that can't be sold moves it to your bags first and then
 asks to delete it. **Move all** moves both kinds. Right-click to keep an item.
 
+Warbound gear is never sold or deleted for being below your item level or the wrong armor type: another character
+can use it. It's held back (Kept tab), and while the bank is open the Bank tab lists it as *to warband bank*: click it
+and it goes into a free warband bank slot. Warbound gear already in the warband bank stays there.
+
 ## Housing decor and cosmetics
 
 The **Collect** tab lists housing decor and cosmetics you learn by using them (ensembles, arsenals, illusions,

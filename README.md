@@ -65,6 +65,12 @@ Extra options for the command line: `Update-WowAddons.cmd -DryRun` (show what wo
 the PTR (`_ptr_`) instead of the live game. The PTR has its own AddOns and saved data, and its backups
 go to a `_ptr_` subfolder.
 
+### Gear export file
+
+In game, click **Gear** on the Vault window (or `/tw gear`), then `/reload` or log out so WoW saves it. Then
+double-click **`Export-Gear.cmd`**: it writes one text file per character to `Documents\TippWorks Gear` (and opens
+that folder), ready to upload or paste into ChatGPT. It only reads WoW's saved data, never changes it.
+
 ### With Claude Code (Rob, Terry)
 
 Start Claude Code **in your clone of this repo** and type:

@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.10.3"
+ns.VERSION = "1.11.0"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -326,6 +326,11 @@ local function WarboundOrBound(bag, slot, link)
     return result
 end
 
+-- Warbound (account-bound) gear, which your other characters can use. Soulbound gear isn't.
+local function Warbound(bag, slot, link, bindType)
+    return bindType == 7 or bindType == 8 or bindType == 9 or WarboundOrBound(bag, slot, link)
+end
+
 -- Containers: your bags, and (while the bank is open) the bank and warband bank tabs.
 local function BagContainers()
     local t = {}
@@ -340,6 +345,14 @@ local function BankContainers()
             seen[id] = true
             t[#t + 1] = id
         end
+    end
+    table.sort(t)
+    return t
+end
+local function WarbandContainers()
+    local t = {}
+    for key, id in pairs(Enum and Enum.BagIndex or {}) do
+        if type(id) == "number" and key:find("^AccountBankTab_") then t[#t + 1] = id end
     end
     table.sort(t)
     return t
@@ -396,8 +409,8 @@ local function Scan(bank)
                     local e = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
                         count = info.stackCount or 1, price = (price or 0) * (info.stackCount or 1) }
                     local gear = classID == ARMOR_CLASS or classID == WEAPON_CLASS
-                    -- Why it could go (first rule that matches).
-                    local why
+                    -- Why it could go (first rule that matches). forThisChar: only useless to this character.
+                    local why, forThisChar
                     if quality == 0 and Opt("junk") then
                         why = "junk"
                     end
@@ -405,11 +418,13 @@ local function Scan(bank)
                         local lvl, worn = ItemLevel(link), EquippedLevel(equipLoc)
                         if lvl and worn and lvl <= worn - Opt("ilvlGap") then
                             why = ("item level %d (you wear %d)"):format(lvl, worn)
+                            forThisChar = true
                         end
                     end
                     if not why and classID == ARMOR_CLASS and TYPED_SLOTS[equipLoc] and Opt("wrongArmor")
                         and myArmor and subclassID and subclassID >= 1 and subclassID <= 4 and subclassID ~= myArmor then
                         why = ARMOR_NAME[subclassID] .. " - you wear " .. ARMOR_NAME[myArmor]
+                        forThisChar = true
                     end
                     if not why and Opt("quest") then
                         local q = C_Container.GetContainerItemQuestInfo and C_Container.GetContainerItemQuestInfo(bag, slot)
@@ -434,6 +449,10 @@ local function Scan(bank)
                         elseif quality and quality >= 5 then keep = "legendary or better"
                         elseif C_Container.GetContainerItemEquipmentSetInfo and C_Container.GetContainerItemEquipmentSetInfo(bag, slot) then
                             keep = "in an equipment set"
+                        elseif forThisChar and Warbound(bag, slot, link, bindType) then
+                            -- Another character can use it: it belongs in the warband bank (Bank tab).
+                            keep = "warbound - for your other characters"
+                            e.store = not bank
                         elseif (petHave or known) and tradeable then
                             keep = "could go on the Auction House"
                         elseif gear and Opt("protectTransmog") and UncollectedAppearance(link) then
@@ -625,7 +644,19 @@ local function BankList()
     for _, e in ipairs(scan.sell) do e.action = "move"; list[#list + 1] = e end
     for _, e in ipairs(scan.delete) do e.action = "delete"; list[#list + 1] = e end
     for _, e in ipairs(scan.decor) do e.action = "decor"; list[#list + 1] = e end
+    -- Warbound gear in your bags that only this character can't use goes into the warband bank.
+    for _, e in ipairs(Scan().kept) do
+        if e.store then e.action = "store"; list[#list + 1] = e end
+    end
     return list
+end
+
+local function FreeWarbandSlot()
+    for _, bag in ipairs(WarbandContainers()) do
+        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            if not C_Container.GetContainerItemInfo(bag, slot) then return bag, slot end
+        end
+    end
 end
 
 -- Free slots in your regular bags (not the reagent bag).
@@ -735,6 +766,20 @@ local function MoveToBags(e)
     return true
 end
 
+-- Puts a bag item into a free warband bank slot (picked up and dropped there).
+local function StoreInWarbandBank(e)
+    if not bankOpen then Print("open your bank first.") return false end
+    if not SameItem(e) then return false end
+    local bag, slot = FreeWarbandSlot()
+    if not bag then Print("no free slot in your warband bank.") return false end
+    ClearCursor()
+    C_Container.PickupContainerItem(e.bag, e.slot)
+    C_Container.PickupContainerItem(bag, slot)
+    ClearCursor() -- if the bank refused it, it goes back to your bags
+    TW.Log("BAGS", "stored %s in the warband bank (%s)", e.name, e.why)
+    return true
+end
+
 -- WoW only deletes from your bags: move the item out of the bank first, then ask.
 local function MoveThenDelete(e)
     local before = {}
@@ -764,7 +809,7 @@ end
 local function MoveAll()
     if moving then return end
     local list = {}
-    for _, e in ipairs(BankList()) do list[#list + 1] = e end
+    for _, e in ipairs(BankList()) do if e.action ~= "store" then list[#list + 1] = e end end
     if #list == 0 then Print("nothing in the bank to move.") return end
     moving = true
     local i, moved = 0, 0
@@ -870,6 +915,8 @@ local function Row(i)
             else Print("after combat: click it again.") end
         elseif db.tab == "bank" and btn ~= "RightButton" then
             if e.action == "delete" then MoveThenDelete(e)
+            elseif e.action == "store" then
+                if StoreInWarbandBank(e) then C_Timer.After(0.3, ns.Refresh) end
             elseif MoveToBags(e) then C_Timer.After(0.3, ns.Refresh) end
         elseif btn == "RightButton" or db.tab == "kept" then ToggleKeep(e)
         elseif db.tab == "delete" then AskDelete(e)
@@ -888,7 +935,8 @@ local function Row(i)
                 or e.cosmetic and "Click: learn it  |  Right-click: keep it in your bags"
                 or "Click: add it to your housing storage  |  Right-click: keep it in your bags")
             or db.tab == "open" and "Click: open it  |  Right-click: don't list it"
-            or db.tab == "bank" and (e.action == "delete" and "Click: move to your bags and delete (asks first)  |  Right-click: keep it"
+            or db.tab == "bank" and (e.action == "store" and "Click: put it in the warband bank  |  Right-click: keep it in your bags"
+                or e.action == "delete" and "Click: move to your bags and delete (asks first)  |  Right-click: keep it"
                 or e.action == "decor" and "Click: move to your bags (then use it from the Collect tab)  |  Right-click: keep it"
                 or "Click: move to your bags (sell at a vendor)  |  Right-click: keep it")
             or db.tab == "auction" and "Click: load it into Post  |  Right-click: don't list it"
@@ -928,7 +976,8 @@ function ns.Refresh()
         elseif e.wear then
             b.right:SetText(swap and ItemIDOf(swap.link) == e.itemID and "|cffffcc00wearing|r" or "|cff33ff99wear once|r")
         elseif db.tab == "bank" then
-            b.right:SetText(e.action == "delete" and "|cffff6060to bags, delete|r"
+            b.right:SetText(e.action == "store" and "|cff33ff99to warband bank|r"
+                or e.action == "delete" and "|cffff6060to bags, delete|r"
                 or e.action == "decor" and "|cff33ff99to bags|r, collect" or ("|cff33ff99to bags|r " .. Money(e.price)))
         else
             b.right:SetText(db.tab == "delete" and "|cffff6060delete|r" or (e.price > 0 and Money(e.price) or ""))
@@ -946,7 +995,12 @@ function ns.Refresh()
     local tsmUI = TSMLoaded() and not (AuctionHouseFrame and AuctionHouseFrame:IsShown())
     win.post:SetShown(db.tab == "auction" and auctionOpen and n > 0 and not tsmUI)
     local toMove = 0
-    if db.tab == "bank" then for _, e in ipairs(list) do if e.action == "move" then toMove = toMove + 1 end end end
+    local toStore = 0
+    if db.tab == "bank" then
+        for _, e in ipairs(list) do
+            if e.action == "move" then toMove = toMove + 1 elseif e.action == "store" then toStore = toStore + 1 end
+        end
+    end
     win.move:SetShown(db.tab == "bank" and bankOpen and n > 0)
     if db.tab == "open" then
         win.sell:Hide()
@@ -963,8 +1017,8 @@ function ns.Refresh()
         win.sell:Hide()
         footer = not bankOpen and "|cff888888Open your bank or warband bank to check it.|r"
             or n == 0 and "|cff888888Nothing in the bank to sell or delete.|r"
-            or ("|cff888888%d to sell, %d to delete or collect - all go to your bags first.|r")
-                :format(toMove, n - toMove)
+            or ("|cff888888%d to sell, %d to delete or collect (to your bags first), %d warbound to store.|r")
+                :format(toMove, n - toMove - toStore, toStore)
     elseif db.tab == "auction" then
         win.sell:Hide()
         footer = n == 0 and "|cff888888Nothing unbound to post.|r"
