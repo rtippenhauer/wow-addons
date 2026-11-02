@@ -72,27 +72,60 @@ function ns.DelveTooltipCount(pattern)
     end
 end
 
+-- The Bountiful marker is per character: a delve you've finished today goes
+-- back to a plain delve marker. So today's list is kept account wide, and a
+-- delve another character saw as Bountiful shows here as done.
+local function Today()
+    local secs = C_DateAndTime and C_DateAndTime.GetSecondsUntilDailyReset and C_DateAndTime.GetSecondsUntilDailyReset()
+    local saved = TW.account.bountiful
+    if not saved or time() >= (saved.resetAt or 0) then
+        if not secs then return end
+        saved = { resetAt = time() + secs, delves = {} }
+        TW.account.bountiful = saved
+    end
+    return saved
+end
+
 local function Scan()
     wipe(list)
     if not (C_AreaPoiInfo and C_AreaPoiInfo.GetDelvesForMap) then return false end
+    local today = Today()
+    local seen, loaded = {}, {}
     for _, zone in ipairs(TW.DELVE_ZONES) do
         local map = TW.FindMapByName(zone)
         if map then
             for _, poi in ipairs(C_AreaPoiInfo.GetDelvesForMap(map) or {}) do
+                loaded[zone] = true
                 local info = C_AreaPoiInfo.GetAreaPOIInfo(map, poi)
                 local atlas = info and info.atlasName and info.atlasName:lower() or ""
                 if info and info.position and atlas:find("bountiful") then
                     local lines = TooltipLines(info)
-                    list[#list + 1] = {
+                    local d = {
                         name = Clean(info.name) or "Delve", zone = zone, bountiful = true,
                         x = info.position.x * 100, y = info.position.y * 100,
                         variant = Variant(lines), lines = lines,
                     }
+                    list[#list + 1] = d
+                    local key = zone .. "|" .. d.name
+                    seen[key] = true
+                    if today and not today.delves[key] then
+                        today.delves[key] = { name = d.name, zone = zone, x = d.x, y = d.y, variant = d.variant, lines = lines }
+                        TW.Log("vault", "Bountiful today: %s (%s)", d.name, zone)
+                    end
                 end
             end
         end
     end
+    for key, s in pairs(today and today.delves or {}) do
+        if not seen[key] then
+            list[#list + 1] = {
+                name = s.name, zone = s.zone, bountiful = true, x = s.x, y = s.y,
+                variant = s.variant, lines = s.lines or {}, done = loaded[s.zone] or nil,
+            }
+        end
+    end
     table.sort(list, function(a, b)
+        if (a.done or false) ~= (b.done or false) then return not a.done end
         if a.zone ~= b.zone then return a.zone < b.zone end
         return a.name < b.name
     end)
@@ -129,6 +162,7 @@ function ns.CreateBountifulPage(parent, top)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:AddLine(d.name .. "  |cffffd100Bountiful|r")
             GameTooltip:AddLine(("%s  %.1f, %.1f"):format(d.zone, d.x, d.y), 1, 1, 1)
+            if d.done then GameTooltip:AddLine("Done today on this character", 0.5, 1, 0.5) end
             if d.variant then GameTooltip:AddLine("Version: " .. d.variant, 1, 1, 1, true) end
             for _, l in ipairs(d.lines) do
                 if l ~= d.variant then GameTooltip:AddLine(l, 0.8, 0.8, 0.8, true) end
@@ -167,9 +201,14 @@ function ns.RefreshBountiful(force)
         row.delve = d
         if d then
             local fp = TW.ClosestFlightPoint(d)
-            row.name:SetText(d.name .. "  |cff888888" .. d.zone .. "|r")
-            row.sub:SetText((d.variant and ("|cffffffff" .. d.variant .. "|r") or "|cff888888version: hover|r")
-                .. (fp and ("  |cff888888via " .. fp .. "|r") or ""))
+            if d.done then
+                row.name:SetText("|cff888888" .. d.name .. "  " .. d.zone .. "|r  |cff80ff80done|r")
+                row.sub:SetText("|cff888888" .. (d.variant or "") .. "|r")
+            else
+                row.name:SetText(d.name .. "  |cff888888" .. d.zone .. "|r")
+                row.sub:SetText((d.variant and ("|cffffffff" .. d.variant .. "|r") or "|cff888888version: hover|r")
+                    .. (fp and ("  |cff888888via " .. fp .. "|r") or ""))
+            end
             row:Show()
         else
             row:Hide()
@@ -178,7 +217,7 @@ function ns.RefreshBountiful(force)
     local shown = math.min(#list, MAX_ROWS)
     if #list == 0 then
         page.empty:SetText(supported
-            and "No Bountiful Delves found on the Midnight zone maps.\nOpen the world map once (or /tw map) if zone maps haven't loaded yet."
+            and "No Bountiful Delves left on this character's maps (finished ones lose their marker).\nLog in a character that hasn't done today's to record the list, or open the world map once (/tw map) if zone maps haven't loaded yet."
             or "This game version doesn't expose delve map markers to addons.")
         page.empty:Show()
     else
@@ -189,5 +228,8 @@ function ns.RefreshBountiful(force)
         page.contentHeight = h
         if not InCombatLockdown() then page:GetParent():SetHeight(h) end
     end
-    page.footer:SetText(("%d Bountiful today%s"):format(#list, KeysText()))
+    local done = 0
+    for _, d in ipairs(list) do if d.done then done = done + 1 end end
+    page.footer:SetText(("%d Bountiful today%s%s"):format(#list,
+        done > 0 and (", %d done"):format(done) or "", KeysText()))
 end

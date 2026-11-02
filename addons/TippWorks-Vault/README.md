@@ -21,7 +21,8 @@ Hover any row for the details from the gearing guide. The checklist resets itsel
 
 **Bountiful tab.** Today's Bountiful Delves are read live from the zone maps, with the version
 of each and the closest flight master. Click one for a waypoint, a share with your group and
-directions, just like a Delver's Calls row.
+directions, just like a Delver's Calls row. A finished Bountiful Delve loses its marker on that
+character, so the day's list is remembered account wide: ones you've done show greyed out as done.
 
 | Command | What it does |
 |---|---|
