@@ -3,7 +3,7 @@
     Writes each character's TippWorks gear export to a text file (to paste or upload into ChatGPT).
 
 .DESCRIPTION
-    In game: click Gear on the Vault window (or /tw gear), then /reload or log out so WoW saves it.
+    In game: open the bank or click Gear on the Vault window (or /tw gear), then /reload or log out so WoW saves it.
     This reads the saved exports from the WTF folder (read only) and writes one file per character to
     Documents\TippWorks Gear, then opens that folder.
     The WoW folder comes from install.settings.json (the same file Update-WowAddons.ps1 uses).
@@ -64,7 +64,7 @@ Get-ChildItem -Path $wtf -Recurse -Filter 'TippWorks-Vault.lua' | Where-Object {
 }
 
 if ($written -eq 0) {
-    Write-Host 'No gear exports found. In game: click Gear on the Vault window (or /tw gear), then /reload or log out.' -ForegroundColor Yellow
+    Write-Host 'No gear exports found. In game: open the bank or click Gear on the Vault window (or /tw gear), then /reload or log out.' -ForegroundColor Yellow
 } elseif (-not $NoOpen) {
     Start-Process explorer.exe $OutDir
 }

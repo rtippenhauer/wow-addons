@@ -6,7 +6,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.2.4"
+ns.VERSION = "1.2.5"
 ns.WIDTH = 350
 ns.Print = TW.Printer("Vault")
 ns.Log = TW.Log

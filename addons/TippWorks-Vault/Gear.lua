@@ -165,6 +165,8 @@ local function SnapshotBank()
         TW.account.warbandGear = { at = date("%Y-%m-%d"), by = UnitName("player"), lines = warband }
     end
     TW.Log("VAULT", "bank gear saved for the export: %d in your bank, %d in the warband bank", #mine, #warband)
+    -- The whole export is saved too, so a bank visit is all Export-Gear.cmd needs.
+    ns.SaveGearExport()
 end
 
 local function Bank(out)
@@ -260,14 +262,19 @@ end
 
 function ns.GearReport() return table.concat(GearLines(), "\n") end
 
+-- Too long to copy in one go, so it's saved too: Export-Gear.cmd (in the wow-addons folder) writes it
+-- to a text file once WoW has saved it (on /reload or logout).
+function ns.SaveGearExport()
+    local lines = GearLines()
+    ns.db.gearExport = { at = date("%Y-%m-%d %H:%M"), lines = lines }
+    TW.Log("VAULT", "gear export made (%d lines)", #lines)
+    return lines
+end
+
 function ns.ShowGear()
     if InCombatLockdown() then ns.Print("leave combat first.") return end
     TW.Guard("gear export", function()
-        local lines = GearLines()
-        -- Too long to copy in one go, so it's saved too: Export-Gear.cmd (in the wow-addons folder) writes it
-        -- to a text file once WoW has saved it (on /reload or logout).
-        ns.db.gearExport = { at = date("%Y-%m-%d %H:%M"), lines = lines }
-        TW.Log("VAULT", "gear export made (%d lines)", #lines)
+        local lines = ns.SaveGearExport()
         TW.ShowText("Gear export - paste into ChatGPT", table.concat(lines, "\n"))
         ns.Print("saved for a file too: /reload (or log out), then run Export-Gear.cmd in your wow-addons folder.")
     end)
