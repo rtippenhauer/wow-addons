@@ -54,8 +54,8 @@ local function TooltipFacts(data)
             if track then facts.track = track
             elseif enchant then facts.enchant = enchant
             elseif t:match("^Equip:") or t:match("^Use:") then
-                local e = t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", " ")
-                facts.effects[#facts.effects + 1] = #e > 240 and (e:sub(1, 237) .. "...") or e
+                -- In full: the export goes to a file, and the numbers at the end matter.
+                facts.effects[#facts.effects + 1] = (t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", " "))
             elseif set and not facts.set and line.leftColor and line.leftColor.r > 0.9 and line.leftColor.g > 0.75
                 and line.leftColor.b < 0.2 then
                 facts.set = t -- the set name line is gold: "Name of the Set (2/5)"
