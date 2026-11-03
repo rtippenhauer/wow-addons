@@ -1,9 +1,10 @@
 local _, ns = ...
 local TW = TippWorks
 
--- Gear export: this character's spec, equipped gear, bags, bank gear, Great
--- Vault progress and currencies as plain text, to paste into ChatGPT (or anywhere)
--- when planning upgrades. /tw gear, or the Gear button on the Vault window.
+-- Gear export: this character's spec and talents, stats, equipped gear (stats,
+-- effects, enchants, gems), bags, bank gear, Great Vault progress and choices and
+-- currencies as plain text, to paste into ChatGPT (or anywhere) when planning
+-- upgrades. /tw gear, the Gear button, or just opening the bank or the Great Vault.
 
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -21,9 +22,29 @@ local function ItemLevel(link)
     return get and Safe(get, link)
 end
 
--- What the tooltip says that the item link doesn't: upgrade track, enchant, tier set.
+-- Stats as the item link carries them (its real item level and bonuses).
+local STATS = {
+    { "ITEM_MOD_STRENGTH_SHORT", "Str" }, { "ITEM_MOD_AGILITY_SHORT", "Agi" }, { "ITEM_MOD_INTELLECT_SHORT", "Int" },
+    { "ITEM_MOD_CRIT_RATING_SHORT", "Crit" }, { "ITEM_MOD_HASTE_RATING_SHORT", "Haste" },
+    { "ITEM_MOD_MASTERY_RATING_SHORT", "Mastery" }, { "ITEM_MOD_VERSATILITY", "Vers" },
+    { "ITEM_MOD_CR_LIFESTEAL_SHORT", "Leech" }, { "ITEM_MOD_CR_AVOIDANCE_SHORT", "Avoidance" },
+    { "ITEM_MOD_CR_SPEED_SHORT", "Speed" },
+}
+local function Stats(link)
+    local get = C_Item.GetItemStats or GetItemStats
+    local s = get and Safe(get, link)
+    if type(s) ~= "table" then return end
+    local parts = {}
+    for _, st in ipairs(STATS) do
+        local v = s[st[1]]
+        if Readable(v) and v > 0 then parts[#parts + 1] = ("%s %d"):format(st[2], v) end
+    end
+    return #parts > 0 and table.concat(parts, ", ") or nil
+end
+
+-- What the tooltip says that the item link doesn't: upgrade track, enchant, tier set, Equip/Use effects.
 local function TooltipFacts(data)
-    local facts = {}
+    local facts = { effects = {} }
     for _, line in ipairs(data and data.lines or {}) do
         local t = line.leftText
         if Readable(t) and type(t) == "string" then
@@ -32,6 +53,9 @@ local function TooltipFacts(data)
             local set = t:match("^(.-)%s*%((%d+/%d+)%)$")
             if track then facts.track = track
             elseif enchant then facts.enchant = enchant
+            elseif t:match("^Equip:") or t:match("^Use:") then
+                local e = t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", " ")
+                facts.effects[#facts.effects + 1] = #e > 240 and (e:sub(1, 237) .. "...") or e
             elseif set and not facts.set and line.leftColor and line.leftColor.r > 0.9 and line.leftColor.g > 0.75
                 and line.leftColor.b < 0.2 then
                 facts.set = t -- the set name line is gold: "Name of the Set (2/5)"
@@ -57,7 +81,10 @@ local function Describe(link, data)
     if ilvl then parts[#parts + 1] = "ilvl " .. ilvl end
     local f = TooltipFacts(data)
     if f.track then parts[#parts + 1] = f.track end
+    local stats = Stats(link)
+    if stats then parts[#parts + 1] = stats end
     if f.set then parts[#parts + 1] = "tier set " .. f.set end
+    for _, e in ipairs(f.effects) do parts[#parts + 1] = e end
     if f.enchant then parts[#parts + 1] = "enchant: " .. f.enchant end
     local gems, empty = Gems(link)
     if #gems > 0 then parts[#parts + 1] = "gems: " .. table.concat(gems, ", ") end
@@ -78,17 +105,117 @@ local function Character(out)
     out[#out + 1] = ("Gold: %d"):format(math.floor((GetMoney() or 0) / 10000))
 end
 
+local PRIMARY = { "Strength", "Agility", "Stamina", "Intellect" }
+local function Num(f, ...)
+    local v = f and Safe(f, ...)
+    return Readable(v) and type(v) == "number" and v or nil
+end
+
+-- Character sheet totals: primary stat, then each secondary as rating and %.
+local function CharacterStats(out)
+    out[#out + 1] = ""
+    out[#out + 1] = "## Character stats (out of combat, with buffs active now)"
+    local spec = GetSpecialization and GetSpecialization()
+    local primary = spec and select(6, GetSpecializationInfo(spec))
+    if primary and PRIMARY[primary] then
+        local ok, _, total = pcall(UnitStat, "player", primary)
+        if ok and Readable(total) and type(total) == "number" then out[#out + 1] = ("- %s: %d"):format(PRIMARY[primary], total) end
+    end
+    local function Line(label, rating, pct)
+        if rating or pct then
+            out[#out + 1] = ("- %s: %s%s"):format(label, rating and tostring(rating) or "?", pct and (" (%.1f%%)"):format(pct) or "")
+        end
+    end
+    Line("Crit", Num(GetCombatRating, CR_CRIT_SPELL or 11), Num(GetCritChance))
+    Line("Haste", Num(GetCombatRating, CR_HASTE_SPELL or 20), Num(GetHaste))
+    Line("Mastery", Num(GetCombatRating, CR_MASTERY or 26), Num(GetMasteryEffect))
+    local vr = CR_VERSATILITY_DAMAGE_DONE or 29
+    local vpct = Num(GetCombatRatingBonus, vr)
+    local vbonus = Num(GetVersatilityBonus, vr)
+    Line("Versatility", Num(GetCombatRating, vr), vpct and (vpct + (vbonus or 0)))
+    Line("Leech", Num(GetCombatRating, CR_LIFESTEAL or 17), Num(GetLifesteal))
+end
+
+local function ConfigName(id)
+    local info = id and C_Traits and C_Traits.GetConfigInfo and Safe(C_Traits.GetConfigInfo, id)
+    return info and Readable(info.name) and info.name or nil
+end
+
+-- Active spec's talents (loadout, hero tree, import string for Wowhead/Raidbots),
+-- other specs' saved loadouts, and equipment sets.
+local function Talents(out)
+    out[#out + 1] = ""
+    out[#out + 1] = "## Talents and specs"
+    local spec = GetSpecialization and GetSpecialization()
+    if not spec then out[#out + 1] = "- (no spec)" return end
+    local specID, specName, _, _, role = GetSpecializationInfo(spec)
+    if not specID then out[#out + 1] = "- (no spec)" return end
+    local CT = C_ClassTalents
+    local active = CT and CT.GetActiveConfigID and Safe(CT.GetActiveConfigID)
+    local loadout = CT and CT.GetLastSelectedSavedConfigID and ConfigName(Safe(CT.GetLastSelectedSavedConfigID, specID))
+    local hero
+    local sub = CT and CT.GetActiveHeroTalentSpec and Safe(CT.GetActiveHeroTalentSpec)
+    if sub and active and C_Traits.GetSubTreeInfo then
+        local info = Safe(C_Traits.GetSubTreeInfo, active, sub)
+        hero = info and Readable(info.name) and info.name or nil
+    end
+    out[#out + 1] = ("- Active: %s (%s)%s%s"):format(specName or "?", role and role:lower() or "?",
+        hero and (", hero talents: " .. hero) or "", loadout and (", loadout: " .. loadout) or "")
+    local import = active and C_Traits.GenerateImportString and Safe(C_Traits.GenerateImportString, active)
+    if Readable(import) and import ~= "" then out[#out + 1] = "- Talent import string: " .. import end
+    for i = 1, (GetNumSpecializations and GetNumSpecializations() or 0) do
+        if i ~= spec then
+            local id, name, _, _, r = GetSpecializationInfo(i)
+            local names = {}
+            for _, cid in ipairs(id and CT and CT.GetConfigIDsBySpecID and Safe(CT.GetConfigIDsBySpecID, id) or {}) do
+                names[#names + 1] = ConfigName(cid)
+            end
+            out[#out + 1] = ("- Other spec: %s (%s)%s"):format(name or "?", r and r:lower() or "?",
+                #names > 0 and (", saved loadouts: " .. table.concat(names, ", ")) or "")
+        end
+    end
+    local ES = C_EquipmentSet
+    local sets = ES and ES.GetEquipmentSetIDs and Safe(ES.GetEquipmentSetIDs) or {}
+    local equipped = {}
+    if #sets > 0 then
+        for _, s in ipairs(SLOTS) do equipped[s[1]] = GetInventoryItemID("player", s[1]) end
+    end
+    for _, setID in ipairs(sets) do
+        local name = Safe(ES.GetEquipmentSetInfo, setID)
+        local forSpec = ES.GetEquipmentSetAssignedSpec and Safe(ES.GetEquipmentSetAssignedSpec, setID)
+        local diff = {}
+        local ids = Safe(ES.GetItemIDs, setID) or {}
+        for _, s in ipairs(SLOTS) do
+            local want = ids[s[1]]
+            if want and want > 0 and want ~= equipped[s[1]] then
+                diff[#diff + 1] = s[2] .. " " .. (C_Item.GetItemNameByID and Safe(C_Item.GetItemNameByID, want) or ("item " .. want))
+            end
+        end
+        out[#out + 1] = ("- Equipment set \"%s\"%s: %s"):format(name or "?",
+            forSpec and (" for " .. (select(2, GetSpecializationInfo(forSpec)) or "?")) or "",
+            #diff > 0 and ("differs from what's equipped: " .. table.concat(diff, "; ")) or "same as equipped")
+    end
+end
+
+local TIER_SLOTS = { [1] = true, [3] = true, [5] = true, [10] = true, [7] = true }
+
 local function Equipped(out)
     out[#out + 1] = ""
     out[#out + 1] = "## Equipped"
+    local noSet = {}
     for _, s in ipairs(SLOTS) do
         local link = GetInventoryItemLink("player", s[1])
         if link then
             local data = C_TooltipInfo and Safe(C_TooltipInfo.GetInventoryItem, "player", s[1])
             out[#out + 1] = ("- %s: %s"):format(s[2], Describe(link, data))
+            if TIER_SLOTS[s[1]] and not TooltipFacts(data).set then noSet[#noSet + 1] = s[2] end
         elseif s[1] ~= 17 then
             out[#out + 1] = ("- %s: (empty)"):format(s[2])
         end
+    end
+    if #noSet > 0 then
+        out[#out + 1] = "- Tier slots without a set piece (the Catalyst can turn this season's gear there into one; "
+            .. "charges are under Currencies): " .. table.concat(noSet, ", ")
     end
 end
 
@@ -196,24 +323,66 @@ local function Vault(out)
     if not (C_WeeklyRewards and C_WeeklyRewards.GetActivities and Enum.WeeklyRewardChestThresholdType) then return end
     out[#out + 1] = ""
     out[#out + 1] = "## Great Vault this week"
+    local choices = {}
     for _, r in ipairs(VAULT_ROWS) do
-        local type = Enum.WeeklyRewardChestThresholdType[r[1]]
-        local acts = type and Safe(C_WeeklyRewards.GetActivities, type)
+        local kind = Enum.WeeklyRewardChestThresholdType[r[1]]
+        local acts = kind and Safe(C_WeeklyRewards.GetActivities, kind)
         if acts and #acts > 0 then
             table.sort(acts, function(a, b) return a.threshold < b.threshold end)
             local slots = {}
-            for _, a in ipairs(acts) do
-                slots[#slots + 1] = (a.progress or 0) >= a.threshold
-                    and ("unlocked (level %s)"):format(tostring(a.level or "?"))
-                    or ("%d/%d"):format(a.progress or 0, a.threshold)
+            for i, a in ipairs(acts) do
+                local text
+                if (a.progress or 0) >= a.threshold then
+                    -- The item level this slot gives (the game's own example item for it).
+                    local example = a.id and C_WeeklyRewards.GetExampleRewardItemHyperlinks
+                        and Safe(C_WeeklyRewards.GetExampleRewardItemHyperlinks, a.id)
+                    local ilvl = Readable(example) and type(example) == "string" and ItemLevel(example)
+                    text = ("unlocked (level %s%s)"):format(tostring(a.level or "?"), ilvl and (", ilvl " .. ilvl) or "")
+                else
+                    text = ("%d/%d"):format(a.progress or 0, a.threshold)
+                end
+                slots[#slots + 1] = text
+                for _, rw in ipairs(a.rewards or {}) do
+                    local link = rw.itemDBID and C_WeeklyRewards.GetItemHyperlink
+                        and Safe(C_WeeklyRewards.GetItemHyperlink, rw.itemDBID)
+                    if Readable(link) and type(link) == "string" and link ~= "" then
+                        local data = C_TooltipInfo and Safe(C_TooltipInfo.GetHyperlink, link)
+                        local _, _, _, equipLoc = C_Item.GetItemInfoInstant(link)
+                        choices[#choices + 1] = ("- %s slot %d: %s (%s)"):format(r[2], i, Describe(link, data),
+                            equipLoc and _G[equipLoc] or "item")
+                    end
+                end
             end
             out[#out + 1] = ("- %s: %s"):format(r[2], table.concat(slots, "; "))
         end
     end
-    if C_WeeklyRewards.HasAvailableRewards and Safe(C_WeeklyRewards.HasAvailableRewards) then
+    local waiting = C_WeeklyRewards.HasAvailableRewards and Safe(C_WeeklyRewards.HasAvailableRewards)
+    if waiting then
         out[#out + 1] = "- A reward from last week is waiting to be claimed"
     end
+    if #choices > 0 then
+        out[#out + 1] = ""
+        out[#out + 1] = "## Great Vault rewards to choose from (pick one)"
+        for _, l in ipairs(choices) do out[#out + 1] = l end
+    elseif waiting then
+        out[#out + 1] = "- (open the Great Vault once so its choices are in this export)"
+    end
 end
+
+-- Opening the Great Vault saves the export too, with the choices in it.
+local vaultEv, vaultHooked = CreateFrame("Frame"), false
+vaultEv:RegisterEvent("ADDON_LOADED")
+local function HookVault()
+    if not WeeklyRewardsFrame or vaultHooked then return end
+    vaultHooked = true
+    WeeklyRewardsFrame:HookScript("OnShow", function()
+        C_Timer.After(1, function()
+            if ns.db and not InCombatLockdown() then TW.Guard("vault snapshot", ns.SaveGearExport) end
+        end)
+    end)
+end
+vaultEv:SetScript("OnEvent", function(_, _, name) if name == "Blizzard_WeeklyRewards" then HookVault() end end)
+HookVault()
 
 -- Every currency you have, grouped as in your currency tab. Collapsed groups
 -- are named but not opened (that would change your currency tab).
@@ -252,6 +421,8 @@ local function GearLines()
         "",
     }
     Character(out)
+    Talents(out)
+    CharacterStats(out)
     Equipped(out)
     Bags(out)
     Bank(out)
