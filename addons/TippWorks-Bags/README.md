@@ -63,7 +63,8 @@ a cosmetic is learned (it works like right-clicking the item, so it waits until 
 
 Wearable cosmetics ("Use: Add this appearance to your Warband collection") only count while you wear them. Their row
 says *wear once*: a click puts it on, and once the appearance is collected your own item goes back on by itself
-(`/tw bags swapback` does that by hand).
+(`/tw bags swapback` does that by hand). Only ones this character can put on are listed: a mage never sees plate or a
+polearm, so those stay in the warband bank for your other characters.
 
 Ones in the bank or warband bank show on the **Bank** tab: click it (or **Move all**) to move it to your bags, then use
 it from the Collect tab. Right-click keeps an item in your bags. `/tw bags housing` and `/tw bags cosmetics` turn these

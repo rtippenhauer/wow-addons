@@ -12,7 +12,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.11.0"
+ns.VERSION = "1.11.1"
 local Print = TW.Printer("Bags")
 local Safe = TW.Safe
 
@@ -91,7 +91,8 @@ end
 
 -- Cosmetics you learn by using them: ensembles, arsenals, illusions, appearance and customization unlocks.
 -- Read from the item's "Use:" line; "Already known" ones aren't listed. Returns the answer and, for
--- /tw bags why, the Use line it read and whether the tooltip says the appearance isn't collected.
+-- /tw bags why, the Use line it read, whether the tooltip says the appearance isn't collected, and
+-- whether a line is red (the game's "you can't use this": an armor or weapon type your class can't wear).
 local COSMETIC_WORDS = { "appearance", "ensemble", "arsenal", "illusion", "transmog", "customization" }
 local function IsCosmetic(bag, slot)
     if not (C_TooltipInfo and C_TooltipInfo.GetBagItem) then return false end
@@ -100,24 +101,26 @@ local function IsCosmetic(bag, slot)
     local use = type(ITEM_SPELL_TRIGGER_ONUSE) == "string" and ITEM_SPELL_TRIGGER_ONUSE or "Use:"
     local unknown = type(TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN) == "string" and TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN
         or "You haven't collected this appearance"
-    local cosmetic, useLine, uncollected = false, nil, false
+    local cosmetic, useLine, uncollected, red = false, nil, false, false
+    local function IsRed(c) return type(c) == "table" and type(c.r) == "number" and c.r > 0.9 and c.g < 0.3 and c.b < 0.3 end
     for _, line in ipairs(data.lines) do
+        if (line.leftText or line.rightText) and (IsRed(line.leftColor) or IsRed(line.rightColor)) then red = true end
         local t = line.leftText
         if type(t) == "string" and not (issecretvalue and issecretvalue(t)) then
             t = t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-            if t == ITEM_SPELL_KNOWN then return false, useLine, uncollected end
+            if t == ITEM_SPELL_KNOWN then return false, useLine, uncollected, red end
             if t == unknown then uncollected = true end
             if t:sub(1, #use) == use then
                 useLine = t
                 local low = t:lower()
-                if low:find("dye", 1, true) then return false, useLine, uncollected end -- housing dyes aren't learned this way
+                if low:find("dye", 1, true) then return false, useLine, uncollected, red end -- housing dyes aren't learned this way
                 for _, w in ipairs(COSMETIC_WORDS) do
                     if low:find(w, 1, true) then cosmetic = true end
                 end
             end
         end
     end
-    return cosmetic, useLine, uncollected
+    return cosmetic, useLine, uncollected, red
 end
 
 -- The item's tooltip lines (color codes stripped; hidden ones left out).
@@ -213,11 +216,17 @@ local function UncollectedAppearance(link)
     return true
 end
 
--- A cosmetic to learn: wearable ones only while their appearance is uncollected (the API or the tooltip says so).
-local function CosmeticToLearn(bag, slot, link, equipLoc)
-    local cosmetic, _, uncollected = IsCosmetic(bag, slot)
+-- A cosmetic to learn: wearable ones only while their appearance is uncollected (the API or the tooltip says so)
+-- and only when this character can put them on (no plate for a mage: leave those for your other characters).
+local function CosmeticToLearn(bag, slot, link, equipLoc, classID, subclassID)
+    local cosmetic, _, uncollected, red = IsCosmetic(bag, slot)
     if not cosmetic then return false end
-    return (equipLoc or "") == "" or uncollected or UncollectedAppearance(link)
+    if (equipLoc or "") == "" then return true end
+    local _, class = UnitClass("player")
+    local myArmor = ARMOR_TYPE[class or ""]
+    if red or (classID == ARMOR_CLASS and TYPED_SLOTS[equipLoc] and myArmor and subclassID
+        and subclassID >= 1 and subclassID <= 4 and subclassID > myArmor) then return false end
+    return uncollected or UncollectedAppearance(link)
 end
 
 ---------------------------------------------------------------------------
@@ -397,7 +406,7 @@ local function Scan(bank)
                         out.decor[#out.decor + 1] = { bag = bag, slot = slot, itemID = info.itemID, link = link, name = name,
                             count = info.stackCount or 1, price = 0, why = "housing decor" }
                     end
-                elseif name and Opt("cosmetic") and CosmeticToLearn(bag, slot, link, equipLoc) then
+                elseif name and Opt("cosmetic") and CosmeticToLearn(bag, slot, link, equipLoc, classID, subclassID) then
                     -- Cosmetics share the Collect (decor) tab: one click learns it. Wearable ones ("Use: Add this
                     -- appearance to your Warband collection") only while the appearance is still uncollected.
                     if not db.keep[info.itemID] then
@@ -1148,9 +1157,9 @@ local function Command(rest)
         local where
         Out("opens for loot: %s, opens by right-click: %s", tostring(info.hasLoot), tostring(RightClickToOpen(found.bag, found.slot)))
         Out("tooltip: %s", table.concat(TooltipLines(found.bag, found.slot), " / "))
-        local cosmetic, useLine, uncollected = IsCosmetic(found.bag, found.slot)
-        Out("slot %s, use line %s, cosmetic %s, tooltip says uncollected %s, API says uncollected %s, decor %s",
-            tostring(equipLoc), useLine and ("\"" .. useLine .. "\"") or "none", tostring(cosmetic), tostring(uncollected),
+        local cosmetic, useLine, uncollected, red = IsCosmetic(found.bag, found.slot)
+        Out("slot %s, use line %s, cosmetic %s, can't wear (red line) %s, tooltip says uncollected %s, API says uncollected %s, decor %s",
+            tostring(equipLoc), useLine and ("\"" .. useLine .. "\"") or "none", tostring(cosmetic), tostring(red), tostring(uncollected),
             tostring(UncollectedAppearance(info.hyperlink)), tostring(IsDecor(id, classID)))
         for _, list in ipairs({ "sell", "delete", "kept", "auction", "decor", "open" }) do
             for _, e in ipairs(scan[list]) do
