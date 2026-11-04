@@ -67,8 +67,8 @@ go to a `_ptr_` subfolder.
 
 ### Gear export file
 
-In game, open your bank (that saves the export, bank included) or the Great Vault (its reward choices included),
-or click **Gear** on the Vault window (or `/tw gear`), then `/reload` or log out so WoW saves it. Then
+The export is saved every time you log out or `/reload`. Open your bank now and then so its gear is in it, and the
+Great Vault on reset day so its reward choices are. Then
 double-click **`Export-Gear.cmd`**: it writes one text file per character to `Documents\TippWorks Gear` (and opens
 that folder), ready to upload or paste into ChatGPT. It only reads WoW's saved data, never changes it.
 

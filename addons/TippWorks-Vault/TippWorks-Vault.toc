@@ -2,7 +2,7 @@
 ## Title: |cffe6a23cTippenhauer Works|r - Weekly Vault (90)
 ## Notes: Level 90 weekly gearing checklist (Great Vault, coffer key shards, Voidcore, catalyst) and today's Bountiful Delves.
 ## Author: rtippenhauer (Tippenhauer Works)
-## Version: 1.2.7
+## Version: 1.3.0
 ## X-Website: https://github.com/rtippenhauer/wow-addons
 ## Category: Tippenhauer Works
 ## Group: TippWorks-Core

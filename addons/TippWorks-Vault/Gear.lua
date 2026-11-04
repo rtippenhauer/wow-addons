@@ -2,9 +2,10 @@ local _, ns = ...
 local TW = TippWorks
 
 -- Gear export: this character's spec and talents, stats, equipped gear (stats,
--- effects, enchants, gems), bags, bank gear, Great Vault progress and choices and
--- currencies as plain text, to paste into ChatGPT (or anywhere) when planning
--- upgrades. /tw gear, the Gear button, or just opening the bank or the Great Vault.
+-- effects, enchants, gems), bags, bank gear, Great Vault progress and choices,
+-- currencies, action bars and a SimulationCraft profile as plain text, to paste
+-- into ChatGPT (or anywhere) when planning upgrades. /tw gear or the Gear button
+-- shows it; it's also saved on logout / reload and when the bank or vault opens.
 
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -162,7 +163,12 @@ local function Talents(out)
     out[#out + 1] = ("- Active: %s (%s)%s%s"):format(specName or "?", role and role:lower() or "?",
         hero and (", hero talents: " .. hero) or "", loadout and (", loadout: " .. loadout) or "")
     local import = active and C_Traits.GenerateImportString and Safe(C_Traits.GenerateImportString, active)
-    if Readable(import) and import ~= "" then out[#out + 1] = "- Talent import string: " .. import end
+    if Readable(import) and import ~= "" then
+        out[#out + 1] = "- Talent import string: " .. import
+        -- The game only exports the active spec's build, so each spec's is kept from when you last played it.
+        ns.db.talents = ns.db.talents or {}
+        ns.db.talents[specID] = { at = date("%Y-%m-%d"), hero = hero, loadout = loadout, import = import }
+    end
     for i = 1, (GetNumSpecializations and GetNumSpecializations() or 0) do
         if i ~= spec then
             local id, name, _, _, r = GetSpecializationInfo(i)
@@ -170,8 +176,13 @@ local function Talents(out)
             for _, cid in ipairs(id and CT and CT.GetConfigIDsBySpecID and Safe(CT.GetConfigIDsBySpecID, id) or {}) do
                 names[#names + 1] = ConfigName(cid)
             end
-            out[#out + 1] = ("- Other spec: %s (%s)%s"):format(name or "?", r and r:lower() or "?",
+            local saved = id and ns.db.talents and ns.db.talents[id]
+            out[#out + 1] = ("- Other spec: %s (%s)%s%s"):format(name or "?", r and r:lower() or "?",
+                saved and saved.hero and (", hero talents: " .. saved.hero) or "",
                 #names > 0 and (", saved loadouts: " .. table.concat(names, ", ")) or "")
+            out[#out + 1] = saved
+                and ("  - Its talent import string (as of %s, when you last played it): %s"):format(saved.at, saved.import)
+                or "  - (its talents aren't known yet: switch to it once)"
         end
     end
     local ES = C_EquipmentSet
@@ -309,13 +320,29 @@ local function Bank(out)
     Section("## Gear in the warband bank (any of my characters can take it)", wb, wb and (", seen by " .. wb.by))
 end
 
-local bankEv = CreateFrame("Frame")
-bankEv:RegisterEvent("BANKFRAME_OPENED")
-bankEv:SetScript("OnEvent", function()
-    -- Give the bank's items a moment to load.
-    C_Timer.After(1.5, function()
-        if ns.db then TW.Guard("bank snapshot", SnapshotBank) end
+-- Snapshot when the bank opens (its items need a moment to load), and again
+-- after each change while it's open, so deposits and withdrawals are caught.
+local bankEv, bankOpen, bankQueued = CreateFrame("Frame"), false, false
+local function QueueBankSnapshot(delay)
+    if bankQueued then return end
+    bankQueued = true
+    C_Timer.After(delay, function()
+        bankQueued = false
+        if bankOpen and ns.db then TW.Guard("bank snapshot", SnapshotBank) end
     end)
+end
+bankEv:RegisterEvent("BANKFRAME_OPENED")
+bankEv:RegisterEvent("BANKFRAME_CLOSED")
+bankEv:RegisterEvent("BAG_UPDATE_DELAYED")
+bankEv:SetScript("OnEvent", function(_, event)
+    if event == "BANKFRAME_OPENED" then
+        bankOpen = true
+        QueueBankSnapshot(1.5)
+    elseif event == "BANKFRAME_CLOSED" then
+        bankOpen = false
+    elseif bankOpen then
+        QueueBankSnapshot(1)
+    end
 end)
 
 local VAULT_ROWS = { { "Raid", "Raid" }, { "Activities", "Dungeons (Mythic+)" }, { "World", "Delves / world" } }
@@ -323,7 +350,8 @@ local function Vault(out)
     if not (C_WeeklyRewards and C_WeeklyRewards.GetActivities and Enum.WeeklyRewardChestThresholdType) then return end
     out[#out + 1] = ""
     out[#out + 1] = "## Great Vault this week"
-    local choices = {}
+    local choices, choiceLinks = {}, {}
+    ns.vaultChoiceLinks = nil
     for _, r in ipairs(VAULT_ROWS) do
         local kind = Enum.WeeklyRewardChestThresholdType[r[1]]
         local acts = kind and Safe(C_WeeklyRewards.GetActivities, kind)
@@ -350,6 +378,7 @@ local function Vault(out)
                         local _, _, _, equipLoc = C_Item.GetItemInfoInstant(link)
                         choices[#choices + 1] = ("- %s slot %d: %s (%s)"):format(r[2], i, Describe(link, data),
                             equipLoc and _G[equipLoc] or "item")
+                        choiceLinks[#choiceLinks + 1] = link
                     end
                 end
             end
@@ -360,7 +389,9 @@ local function Vault(out)
     if waiting then
         out[#out + 1] = "- A reward from last week is waiting to be claimed"
     end
-    if #choices > 0 then
+    -- Once a reward is claimed the old choices can linger in the activity data: list them only while one waits.
+    if waiting and #choices > 0 then
+        ns.vaultChoiceLinks = choiceLinks
         out[#out + 1] = ""
         out[#out + 1] = "## Great Vault rewards to choose from (pick one)"
         for _, l in ipairs(choices) do out[#out + 1] = l end
@@ -369,17 +400,23 @@ local function Vault(out)
     end
 end
 
--- Opening the Great Vault saves the export too, with the choices in it.
+-- Opening the Great Vault saves the export too, with the choices in it: again a
+-- few seconds later (a choice's Equip text can still be loading at first), and
+-- when it closes (after a pick the choices are gone and the reward is in your bags
+-- or currencies).
 local vaultEv, vaultHooked = CreateFrame("Frame"), false
 vaultEv:RegisterEvent("ADDON_LOADED")
+local function VaultSave()
+    if ns.db and not InCombatLockdown() then TW.Guard("vault snapshot", ns.SaveGearExport) end
+end
 local function HookVault()
     if not WeeklyRewardsFrame or vaultHooked then return end
     vaultHooked = true
     WeeklyRewardsFrame:HookScript("OnShow", function()
-        C_Timer.After(1, function()
-            if ns.db and not InCombatLockdown() then TW.Guard("vault snapshot", ns.SaveGearExport) end
-        end)
+        C_Timer.After(1, VaultSave)
+        C_Timer.After(5, VaultSave)
     end)
+    WeeklyRewardsFrame:HookScript("OnHide", function() C_Timer.After(1, VaultSave) end)
 end
 vaultEv:SetScript("OnEvent", function(_, _, name) if name == "Blizzard_WeeklyRewards" then HookVault() end end)
 HookVault()
@@ -414,6 +451,168 @@ local function Currencies(out)
     end
 end
 
+-- SimulationCraft profile (paste into Raidbots Quick Sim / Top Gear), built from
+-- the item links the same way the SimulationCraft addon does: item id, enchant,
+-- gems, bonus ids, context, drop level and crafted stats. Bag gear and vault
+-- choices are commented out, which is how Top Gear finds alternatives.
+local SIMC_SLOT = {
+    [1] = "head", [2] = "neck", [3] = "shoulder", [15] = "back", [5] = "chest", [9] = "wrist", [10] = "hands",
+    [6] = "waist", [7] = "legs", [8] = "feet", [11] = "finger1", [12] = "finger2", [13] = "trinket1",
+    [14] = "trinket2", [16] = "main_hand", [17] = "off_hand",
+}
+local SIMC_EQUIPLOC = {
+    INVTYPE_HEAD = "head", INVTYPE_NECK = "neck", INVTYPE_SHOULDER = "shoulder", INVTYPE_CLOAK = "back",
+    INVTYPE_CHEST = "chest", INVTYPE_ROBE = "chest", INVTYPE_WRIST = "wrist", INVTYPE_HAND = "hands",
+    INVTYPE_WAIST = "waist", INVTYPE_LEGS = "legs", INVTYPE_FEET = "feet", INVTYPE_FINGER = "finger1",
+    INVTYPE_TRINKET = "trinket1", INVTYPE_WEAPON = "main_hand", INVTYPE_2HWEAPON = "main_hand",
+    INVTYPE_WEAPONMAINHAND = "main_hand", INVTYPE_RANGED = "main_hand", INVTYPE_RANGEDRIGHT = "main_hand",
+    INVTYPE_WEAPONOFFHAND = "off_hand", INVTYPE_SHIELD = "off_hand", INVTYPE_HOLDABLE = "off_hand",
+}
+local SIMC_ROLE = { DAMAGER = nil, HEALER = "heal", TANK = "tank" }
+local REGIONS = { "us", "kr", "eu", "tw", "cn" }
+
+local function Token(s)
+    return (s or ""):gsub("(%l)(%u)", "%1_%2"):gsub("[%s%-]+", "_"):gsub("'", ""):lower()
+end
+
+-- "slot=,id=...,bonus_id=..." from an item link, or nil if it isn't one.
+local function SimcItem(slot, link)
+    local body = type(link) == "string" and link:match("|Hitem:([^|]+)|h")
+    if not body then return end
+    local f = {}
+    for v in (body .. ":"):gmatch("([^:]*):") do f[#f + 1] = v end
+    local function n(i) return tonumber(f[i]) end
+    local parts = { slot .. "=", "id=" .. (f[1] or "0") }
+    if n(2) then parts[#parts + 1] = "enchant_id=" .. f[2] end
+    local gems = {}
+    for i = 3, 6 do if n(i) then gems[#gems + 1] = f[i] end end
+    if #gems > 0 then parts[#parts + 1] = "gem_id=" .. table.concat(gems, "/") end
+    local i = 14
+    local numBonus = n(13) or 0
+    local bonus = {}
+    for b = 1, numBonus do if n(i + b - 1) then bonus[#bonus + 1] = f[i + b - 1] end end
+    if #bonus > 0 then parts[#parts + 1] = "bonus_id=" .. table.concat(bonus, "/") end
+    if n(12) then parts[#parts + 1] = "context=" .. f[12] end
+    i = i + numBonus
+    local numMods = n(i) or 0
+    local crafted = {}
+    for m = 1, numMods do
+        local mtype, value = n(i + 2 * m - 1), f[i + 2 * m]
+        if mtype == 9 and tonumber(value) then parts[#parts + 1] = "drop_level=" .. value
+        elseif (mtype == 29 or mtype == 30) and tonumber(value) then crafted[#crafted + 1] = value end
+    end
+    if #crafted > 0 then parts[#parts + 1] = "crafted_stats=" .. table.concat(crafted, "/") end
+    return table.concat(parts, ",")
+end
+
+local function Simc(out)
+    local spec = GetSpecialization and GetSpecialization()
+    if not spec then return end
+    local _, specName, _, _, role = GetSpecializationInfo(spec)
+    local _, classFile = UnitClass("player")
+    local _, raceFile = UnitRace("player")
+    raceFile = raceFile == "Scourge" and "Undead" or raceFile == "EarthenDwarf" and "Earthen" or raceFile
+    out[#out + 1] = ""
+    out[#out + 1] = "## SimulationCraft profile (copy everything below into Raidbots Quick Sim or Top Gear)"
+    out[#out + 1] = ('%s="%s"'):format(Token(classFile), UnitName("player") or "?")
+    out[#out + 1] = "level=" .. UnitLevel("player")
+    out[#out + 1] = "race=" .. Token(raceFile)
+    out[#out + 1] = "region=" .. (REGIONS[GetCurrentRegion and GetCurrentRegion() or 1] or "us")
+    out[#out + 1] = "server=" .. Token(GetRealmName())
+    if SIMC_ROLE[role or ""] then out[#out + 1] = "role=" .. SIMC_ROLE[role] end
+    out[#out + 1] = "spec=" .. Token(specName)
+    local active = C_ClassTalents and C_ClassTalents.GetActiveConfigID and Safe(C_ClassTalents.GetActiveConfigID)
+    local import = active and C_Traits.GenerateImportString and Safe(C_Traits.GenerateImportString, active)
+    if Readable(import) and import ~= "" then out[#out + 1] = "talents=" .. import end
+    out[#out + 1] = ""
+    for _, s in ipairs(SLOTS) do
+        local line = SimcItem(SIMC_SLOT[s[1]], GetInventoryItemLink("player", s[1]))
+        if line then out[#out + 1] = line end
+    end
+    local function Commented(title, links)
+        if #links == 0 then return end
+        out[#out + 1] = ""
+        out[#out + 1] = "### " .. title
+        for _, link in ipairs(links) do
+            local _, _, _, equipLoc = C_Item.GetItemInfoInstant(link)
+            local line = SIMC_EQUIPLOC[equipLoc or ""] and SimcItem(SIMC_EQUIPLOC[equipLoc], link)
+            if line then
+                out[#out + 1] = ("# %s (%s)"):format(ItemName(link), tostring(ItemLevel(link) or "?"))
+                out[#out + 1] = "# " .. line
+            end
+        end
+    end
+    local bagLinks = {}
+    for bag = 0, (NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4) do
+        for slot = 1, Safe(C_Container.GetContainerNumSlots, bag) or 0 do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.hyperlink then bagLinks[#bagLinks + 1] = info.hyperlink end
+        end
+    end
+    Commented("Gear from Bags", bagLinks)
+    Commented("Weekly Reward Choices", ns.vaultChoiceLinks or {})
+end
+
+-- What's on each action bar and its keybinding, with macro text, so rotation
+-- advice can refer to your actual buttons. Bars 1-8 as Edit Mode numbers them.
+local BARS = {
+    { "Bar 1", nil, "ACTIONBUTTON" }, { "Bar 2", 61, "MULTIACTIONBAR1BUTTON" },
+    { "Bar 3", 49, "MULTIACTIONBAR2BUTTON" }, { "Bar 4", 25, "MULTIACTIONBAR3BUTTON" },
+    { "Bar 5", 37, "MULTIACTIONBAR4BUTTON" }, { "Bar 6", 145, "MULTIACTIONBAR5BUTTON" },
+    { "Bar 7", 157, "MULTIACTIONBAR6BUTTON" }, { "Bar 8", 169, "MULTIACTIONBAR7BUTTON" },
+}
+local function Str(v) return Readable(v) and type(v) == "string" and v ~= "" and v or nil end
+
+local function ActionText(slot)
+    local ok, kind, id = pcall(GetActionInfo, slot)
+    if not ok or not Readable(kind) or not kind then return end
+    if not Readable(id) then id = nil end
+    if kind == "spell" then
+        local name = id and C_Spell and C_Spell.GetSpellName and Str(Safe(C_Spell.GetSpellName, id))
+        return name or ("spell " .. tostring(id))
+    elseif kind == "macro" then
+        local name, _, body
+        if id and GetMacroInfo then
+            local mok, mname, _, mbody = pcall(GetMacroInfo, id)
+            if mok then name, body = Str(mname), Str(mbody) end
+        end
+        name = name or Str(Safe(GetActionText, slot)) or "?"
+        return "macro \"" .. name .. "\"" .. (body and (": " .. strtrim(body):gsub("\r?\n", " / ")) or "")
+    elseif kind == "item" then
+        return "item " .. (id and Str(Safe(C_Item.GetItemNameByID, id)) or tostring(id))
+    elseif kind == "flyout" then
+        return "flyout " .. (id and GetFlyoutInfo and Str(Safe(GetFlyoutInfo, id)) or tostring(id))
+    end
+    return kind .. (id and (" " .. tostring(id)) or "")
+end
+
+local function ActionBars(out)
+    if not GetActionInfo then return end
+    out[#out + 1] = ""
+    out[#out + 1] = "## Action bars and keybindings (current spec)"
+    local offset = GetBonusBarOffset and Safe(GetBonusBarOffset) or 0
+    local page = GetActionBarPage and Safe(GetActionBarPage) or 1
+    local any = false
+    for _, bar in ipairs(BARS) do
+        local first = bar[2] or ((offset and offset > 0) and ((6 + offset - 1) * 12 + 1) or ((page - 1) * 12 + 1))
+        for b = 1, 12 do
+            local text = ActionText(first + b - 1)
+            if text then
+                local keys = {}
+                local kok, k1, k2 = pcall(GetBindingKey, bar[3] .. b)
+                if kok then
+                    if Str(k1) then keys[#keys + 1] = k1 end
+                    if Str(k2) then keys[#keys + 1] = k2 end
+                end
+                out[#out + 1] = ("- %s button %d%s: %s"):format(bar[1], b,
+                    #keys > 0 and (" [" .. table.concat(keys, ", ") .. "]") or "", text)
+                any = true
+            end
+        end
+    end
+    if not any then out[#out + 1] = "- (none readable)" end
+end
+
 local function GearLines()
     local out = {
         ("# World of Warcraft character export (%s, TippWorks-Vault %s)"):format(date("%Y-%m-%d"), ns.VERSION),
@@ -428,6 +627,8 @@ local function GearLines()
     Bank(out)
     Vault(out)
     Currencies(out)
+    ActionBars(out)
+    Simc(out)
     return out
 end
 
@@ -450,3 +651,26 @@ function ns.ShowGear()
         ns.Print("saved for a file too: /reload (or log out), then run Export-Gear.cmd in your wow-addons folder.")
     end)
 end
+
+-- Logging out (or /reload) saves a fresh export, so Export-Gear.cmd always has
+-- what you ended the session with. Switching spec or talents keeps that spec's
+-- build for the export's "Other spec" lines.
+local saveEv = CreateFrame("Frame")
+saveEv:RegisterEvent("PLAYER_LOGOUT")
+saveEv:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+saveEv:RegisterEvent("TRAIT_CONFIG_UPDATED")
+saveEv:RegisterEvent("PLAYER_ENTERING_WORLD")
+local talentQueued = false
+saveEv:SetScript("OnEvent", function(_, event, unit)
+    if not ns.db then return end
+    if event == "PLAYER_LOGOUT" then
+        TW.Guard("logout export", ns.SaveGearExport)
+    elseif event ~= "PLAYER_SPECIALIZATION_CHANGED" or unit == "player" then
+        if talentQueued then return end
+        talentQueued = true
+        C_Timer.After(3, function()
+            talentQueued = false
+            if not InCombatLockdown() then TW.Guard("talent record", Talents, {}) end
+        end)
+    end
+end)
