@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.6.0"
+ns.VERSION = "1.6.1"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -113,6 +113,14 @@ local function Norm(s) return s and s:lower():gsub("\226\128\153", "'"):gsub("^t
 
 local byNorm = {}
 for _, c in ipairs(CHAMBERS) do byNorm[Norm(c.name)] = c end
+-- Each chamber's middle on the map: the average of its Sturdy Chests.
+for _, c in ipairs(CHAMBERS) do
+    local x, y, k = 0, 0, 0
+    for _, ch in ipairs(CHESTS) do
+        if ch[2] == c.name then x, y, k = x + ch[3], y + ch[4], k + 1 end
+    end
+    if k > 0 then c.center = { x / k, y / k } else c.center = c.spot end
+end
 
 -- The chamber you're standing in: from the sub-zone text or the map name.
 local function CurrentChamber()
@@ -529,6 +537,11 @@ local function AllQuests()
     return all
 end
 
+-- Wah'du's weekly quests are named after the chamber to clear: that chamber, or nil.
+local function QuestChamber(title)
+    return type(title) == "string" and byNorm[Norm(title)] or nil
+end
+
 local function QuestPicked(questID)
     if not Readable(questID) or not run then return end
     local title = Safe(C_QuestLog.GetTitleForQuestID, questID) or ("quest " .. questID)
@@ -557,6 +570,14 @@ end
 local function GuideQuest(questID)
     if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then pcall(C_SuperTrack.SetSuperTrackedQuestID, questID) end
     local title = AllQuests()[questID] or tostring(questID)
+    local c = QuestChamber(title)
+    if c and c.center and not (C_QuestLog.IsComplete and Safe(C_QuestLog.IsComplete, questID)) then
+        -- The game's quest arrow doesn't point inside the Labyrinth: arrow to the chamber instead.
+        Print(("|cffffd100%s|r - Wah'du's chamber: clear %s (%s), marked on the map."):format(title, c.name, c.where))
+        for _, l in ipairs(QuestText(questID)) do Print("  " .. l) end
+        ns.GuideTo(c.name .. " - Wah'du's quest", c.center[1], c.center[2])
+        return
+    end
     Print("|cffffd100" .. title .. "|r - tracked, follow the quest arrow.")
     for _, l in ipairs(QuestText(questID)) do Print("  " .. l) end
     local wp = C_QuestLog.GetNextWaypointText and Safe(C_QuestLog.GetNextWaypointText, questID)
@@ -658,7 +679,7 @@ function ns.DrawPins()
         overlay:SetFrameLevel(canvas:GetFrameLevel() + 2050)
     end
     for _, p in ipairs(pins) do p:Hide() end
-    if WorldMapFrame:GetMapID() ~= MAZE_MAP or db.hidePins then return end
+    if WorldMapFrame:GetMapID() ~= MAZE_MAP then return end
     local w, h = canvas:GetSize()
     local size = math.max(12, (w or 0) / 55)
     local n = 0
@@ -686,6 +707,15 @@ function ns.DrawPins()
         p:SetPoint("CENTER", overlay, "TOPLEFT", x / 100 * w, -y / 100 * h)
         p:Show()
     end
+    -- Wah'du's quest: its chamber, until the quest is done (shown even with the chest pins hidden).
+    for id, title in pairs(AllQuests()) do
+        local c = QuestChamber(title)
+        if c and c.center and not Safe(C_QuestLog.IsComplete, id) then
+            Pin(c.center[1], c.center[2], "Wah'du's quest: " .. c.name,
+                ("Clear %s (%s), then hand it in to Wah'du in the Chamber of Rites."):format(c.name, c.where), "QuestNormal")
+        end
+    end
+    if db.hidePins then return end
     for _, ch in ipairs(CHESTS) do
         if not warband.chests[ch[1]] then
             Pin(ch[3], ch[4], ("Sturdy Chest %d"):format(ch[1]), ("%s  %.1f, %.1f"):format(ch[2], ch[3], ch[4]), "VignetteLoot")
@@ -924,10 +954,12 @@ local function RunList()
         if qn == 0 then list[#list + 1] = Header("Quests from the Labyrinth") end
         qn = qn + 1
         local done = Safe(C_QuestLog.IsComplete, id)
-        list[#list + 1] = { quest = id, left = "  " .. title,
+        local c = QuestChamber(title)
+        list[#list + 1] = { quest = id, left = "  " .. (c and ("Wah'du: " .. c.name .. " |cff888888(" .. c.where .. ")|r") or title),
             right = done and "|cff33ff33turn in|r" or "|cffffd100click: where to go|r",
             tip = function()
                 local t = { title }
+                if c then t[#t + 1] = ("Wah'du's weekly quest: clear %s (%s). The quest icon on the map marks it."):format(c.name, c.where) end
                 for _, l in ipairs(QuestText(id)) do t[#t + 1] = l end
                 t[#t + 1] = "Click: track it and point the way"
                 return t

@@ -40,6 +40,8 @@ For the Labyrinth of Kindo'jan, the 12.1.5 mega-delve. The window opens by itsel
   Kindo'jan* heading, e.g. the one from a mask, plus anything picked up inside. It doesn't matter
   when you picked it up or where you are now; `/tw maze` shows them anywhere. Click one to track it,
   see the next step, and get a waypoint to where the game says to go to finish it.
+  Wah'du's weekly quest (named after a chamber, e.g. *Jan'alai's Refuge*) shows as "Wah'du: <chamber>", with a quest
+  icon on the Labyrinth map over that chamber until it's done; a click points the guide arrow there.
 
 | Command | What it does |
 |---|---|
