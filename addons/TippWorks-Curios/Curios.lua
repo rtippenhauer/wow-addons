@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.14"
+ns.VERSION = "1.0.15"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -52,11 +52,14 @@ local IGNORED_VIGNETTES = { [6116] = true } -- Delver's Supplies
 -- Markers with no info that are known to be curiosities (seen in game: every
 -- 5482 sat exactly on a Mislaid Curiosity, The Darkway, Oct 12 2026).
 local VIGNETTE_KINDS = { [5482] = { "Curiosity", "Mislaid Curiosity" } }
--- Except in the Labyrinth of Kindo'jan: there 5482 also marks something by the
--- hidden Hexmask spots. It drifted around Chamber of Rites (49-51, 81-84, Nov 1
--- 2026) and listed four curiosities that weren't there. Real curiosities there
--- come with an object GUID, so those markers are ignored.
-local LABYRINTH_IGNORED = { [5482] = true }
+-- In the Labyrinth of Kindo'jan 5482 also marks something that moves (it drifted
+-- around Chamber of Rites, 49-51, 81-84, and by Jan'alai's Refuge). But every
+-- curiosity picked up there sat on a 5482 (Nov 5 and 7 2026: 23 of 23), so there
+-- a 5482 is listed once it has stayed put for LAB_STILL seconds; one that moves
+-- more than LAB_DRIFT (map fraction) is dropped for the run.
+local LABYRINTH_IGNORED = {}
+local LAB_STILL, LAB_DRIFT = 3, 0.004
+local labMarks = {} -- vignette GUID -> { x, y, t, key, mover } (this session's Labyrinth run)
 local function InLabyrinth()
     local name = GetInstanceInfo()
     return Readable(name) and type(name) == "string"
@@ -563,6 +566,25 @@ local function Scan()
             local known = not Ignored(vid) and VIGNETTE_KINDS[vid]
             if vid and db.dundunVignettes[vid] then
                 Track("dundun", DUNDUN, DUNDUN, pos)
+            elseif known and InLabyrinth() then
+                local m = labMarks[guid]
+                if not m then
+                    labMarks[guid] = { x = pos.x, y = pos.y, t = GetTime() }
+                elseif not m.mover and math.sqrt((pos.x - m.x) ^ 2 + (pos.y - m.y) ^ 2) > LAB_DRIFT then
+                    m.mover = true
+                    ns.Log("CURIO", "Labyrinth marker %s moved (%.1f,%.1f -> %.1f,%.1f) - not a curiosity", tostring(vid),
+                        m.x * 100, m.y * 100, pos.x * 100, pos.y * 100)
+                    local it = m.key and run.items[m.key]
+                    if it and not it.confirmed and not next(it.looted or {}) then
+                        run.items[m.key] = nil
+                        for i, k in ipairs(run.order) do if k == m.key then table.remove(run.order, i) break end end
+                        if Syncable(it) then Broadcast("X|" .. m.key) end
+                        changed = true
+                    end
+                elseif not m.mover and GetTime() - m.t >= LAB_STILL then
+                    m.key = m.key or ("%s@%.3f,%.3f"):format(known[2], m.x, m.y)
+                    Track(m.key, known[1], known[2], { x = m.x, y = m.y }, true)
+                end
             elseif known then
                 Track(("%s@%.3f,%.3f"):format(known[2], pos.x, pos.y), known[1], known[2], pos, true)
             elseif not Ignored(vid) then
@@ -1255,9 +1277,19 @@ local function OnAddonMessage(prefix, msg, _, sender)
         DropFrom(who)
         return
     end
+    if tag == "X" then
+        -- They saw that Labyrinth marker move: not a curiosity. Drop it if only they had listed it.
+        local k = run.alias and run.alias[key] or key
+        local it = key and run.items[k]
+        if it and it.via == who and not it.confirmed and not next(it.looted or {}) then
+            run.items[k] = nil
+            for i, o in ipairs(run.order) do if o == k then table.remove(run.order, i) break end end
+            ns.RefreshCurios()
+        end
+        return
+    end
     x, y, map = tonumber(x), tonumber(y), tonumber(map)
     if not (key and x and y and map) then return end
-    if LabyrinthGhost(key) then return end
     local it, new = AddItem(key, kind, name, map, x, y)
     if new then it.via = who end
     if tag == "L" then MarkLooted(it, who, true) else ns.RefreshCurios() end

@@ -11,7 +11,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.6.1"
+ns.VERSION = "1.6.2"
 local Print = TW.Printer("Labyrinth")
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -292,13 +292,24 @@ end
 ---------------------------------------------------------------------------
 -- Watching the game
 ---------------------------------------------------------------------------
--- Scenario objectives: log every one; completing one while in a chamber
--- completes that chamber (to be confirmed from the logs).
+-- Scenario objectives: log every one. A chamber is one scenario step: first an
+-- objective like "Relic Raiders cleared", then its boss ("Drill Sergeant slain")
+-- shows up in the same step. So a chamber is done when its boss dies (slain,
+-- defeated, vanquished) or its step ends, not when the first objective is done.
 local criteriaDone = {}
+local BOSS_WORDS = { "slain", "defeated", "vanquished" }
+local NOT_A_CHAMBER = { ["Choose Your Path"] = true, ["Collect Your Reward!"] = true, ["Treasure Room"] = true }
+local curStep, pending -- this step's title; the chamber whose objective was done in it
 local function ScanScenario()
     if not (C_ScenarioInfo and C_ScenarioInfo.GetScenarioStepInfo) then return end
     local step = Safe(C_ScenarioInfo.GetScenarioStepInfo)
-    if type(step) == "table" and Readable(step.title) then Note("step:" .. tostring(step.title), "scenario step: %s", tostring(step.title)) end
+    if type(step) == "table" and Readable(step.title) then
+        Note("step:" .. tostring(step.title), "scenario step: %s", tostring(step.title))
+        if step.title ~= curStep then
+            if pending then MarkChamber(pending.c, "done", "step ended after: " .. pending.key) end
+            curStep, pending = step.title, nil
+        end
+    end
     local count = type(step) == "table" and Readable(step.numCriteria) and step.numCriteria or 0
     for i = 1, count do
         local ok, c = pcall(C_ScenarioInfo.GetCriteriaInfo, i)
@@ -314,7 +325,16 @@ local function ScanScenario()
                 for _, ch in ipairs(CHAMBERS) do
                     if key:lower():find(Norm(ch.name), 1, true) then named = ch end
                 end
-                MarkChamber(named or here, "done", "objective: " .. key)
+                local c = named or here
+                local low = key:lower()
+                local boss = false
+                for _, w in ipairs(BOSS_WORDS) do if low:find(w, 1, true) then boss = true end end
+                if boss then
+                    MarkChamber(c, "done", "objective: " .. key)
+                    pending = nil
+                elseif c and not NOT_A_CHAMBER[curStep or ""] then
+                    pending = { c = c, key = key } -- done once its boss dies or the step moves on
+                end
             end
         end
     end

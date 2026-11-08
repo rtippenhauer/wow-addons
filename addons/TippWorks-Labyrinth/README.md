@@ -4,7 +4,8 @@ For the Labyrinth of Kindo'jan, the 12.1.5 mega-delve. The window opens by itsel
 **this run**. Chamber progress doesn't carry over between runs, so each new entry starts a fresh list.
 
 - **Chambers (x/9):** the nine chambers, with the one you're standing in marked with ">". Each one
-  goes from "in progress" to "done" when the game completes its objective. Every 3 is a reward
+  goes from "in progress" to "done" when its boss dies (or the run moves on to the next step), not
+  when the first objective like clearing the room is done. Every 3 is a reward
   checkpoint (3, 6, 9). **Right-click** a chamber to mark it done or not done by hand. **Left-click** a
   starred (*) chamber to get the guide arrow to its mask/locked-room spot. Map waypoints don't work
   inside delves, so this uses TippWorks-Curios' arrow (or TomTom's).
