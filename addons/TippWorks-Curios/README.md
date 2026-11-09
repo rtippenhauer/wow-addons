@@ -11,7 +11,8 @@ also tracks who has picked up which one.
   marker there is listed (and shared with your group) once it has stayed in one spot for a few seconds.
   The ones that move around aren't curiosities and are dropped.
 - **Pickups the game never showed:** if you get a Boon with no known curiosity nearby, the addon
-  adds a **Curiosity (picked up)** row where you stood, so your count stays right.
+  adds a **Curiosity (picked up)** row where you stood, so your count stays right. It is shared with
+  your group: each player gets their own copy, so the row shows them where to find theirs.
 - **Dundun:** when his marker shows up, you get a big on-screen warning and the raid-warning
   sound, an orange **Dundun** row at the top of the panel, and the guide arrow switches to him and
   follows him as he moves. His "hiding" announcement also triggers the warning. The alert and the

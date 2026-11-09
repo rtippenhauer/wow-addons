@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.15"
+ns.VERSION = "1.0.16"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -85,7 +85,7 @@ local DUNDUN, DUNDUN_NPC = "Dundun", 242704
 -- The game's own curiosity counter: this currency ticks up once per pickup.
 local CURIO_CURRENCY = 3253
 
-local function Syncable(it) return it.kind ~= UNKNOWN and it.kind ~= PICKUP and it.kind ~= DUNDUN end
+local function Syncable(it) return it.kind ~= UNKNOWN and it.kind ~= DUNDUN end
 
 local function VignetteID(guid)
     return Readable(guid) and type(guid) == "string"
@@ -287,7 +287,7 @@ local function FindSame(name, map, x, y, kind, ownGuid)
     for _, k in ipairs(run.order) do
         local it = run.items[k]
         local full = ownGuid and it.ownGuid and (it.guidCount or 1) >= maxCopies
-        if not full and (it.name == name or kind == UNKNOWN or it.kind == UNKNOWN) then
+        if not full and (it.name == name or kind == UNKNOWN or it.kind == UNKNOWN or kind == PICKUP or it.kind == PICKUP) then
             local both = ownGuid and it.ownGuid
             local yards, mapDelta = both and COPY_YARDS or MERGE_YARDS, both and 0.002 or 0.01
             if wx and it.wx then
@@ -307,8 +307,8 @@ local function AddItem(key, kind, name, map, x, y, ownGuid)
     local it = run.items[run.alias[key] or key]
     if it then return it, false end
     local same = FindSame(name, map, x, y, kind, ownGuid)
-    if same and same.kind == UNKNOWN and kind ~= UNKNOWN then
-        -- The unnamed object turned out to be this: take the real name.
+    if same and (same.kind == UNKNOWN or same.kind == PICKUP) and kind ~= UNKNOWN and kind ~= PICKUP then
+        -- The unnamed object (or a pickup the game showed no marker for) turned out to be this: take the real name.
         run.alias[key] = same.key
         ns.Log("CURIO", "unnamed object at %.1f,%.1f is a %s", x * 100, y * 100, name)
         same.kind, same.name = kind, name
@@ -982,7 +982,8 @@ local function OnLootMessage(msg)
         ns.Log("CURIO", "got a Boon, no curiosity known nearby and no position to record it")
         return
     end
-    local it = AddItem(("pickup@%d"):format(time()), PICKUP, PICKUP_NAME, map, p.x, p.y)
+    -- Shared with the group (each player gets their own copy, so it tells them where one is).
+    local it = AddItem(("pickup@%s@%d"):format(me, time()), PICKUP, PICKUP_NAME, map, p.x, p.y)
     it.present = false
     ns.Log("CURIO", "got a Boon with no curiosity known nearby -> added '%s' at %.1f,%.1f", PICKUP_NAME, p.x * 100, p.y * 100)
     MarkLooted(it, me)
@@ -1292,6 +1293,7 @@ local function OnAddonMessage(prefix, msg, _, sender)
     if not (key and x and y and map) then return end
     local it, new = AddItem(key, kind, name, map, x, y)
     if new then it.via = who end
+    if new and kind == PICKUP then it.present = false end
     if tag == "L" then MarkLooted(it, who, true) else ns.RefreshCurios() end
 end
 
