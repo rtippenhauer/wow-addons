@@ -5,7 +5,9 @@ local TW = TippWorks
 -- effects, enchants, gems), bags, bank gear, Great Vault progress and choices,
 -- currencies, action bars and a SimulationCraft profile as plain text, to paste
 -- into ChatGPT (or anywhere) when planning upgrades. /tw gear or the Gear button
--- shows it; it's also saved on logout / reload and when the bank or vault opens.
+-- shows it; it's also saved a few seconds after login / reload, after gear
+-- changes, and when the bank or vault opens. A save that can't see the character
+-- (no spec, gear or item level, as at logout) never replaces one that could.
 
 local Safe = TW.Safe
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
@@ -304,7 +306,7 @@ local function SnapshotBank()
     end
     TW.Log("VAULT", "bank gear saved for the export: %d in your bank, %d in the warband bank", #mine, #warband)
     -- The whole export is saved too, so a bank visit is all Export-Gear.cmd needs.
-    ns.SaveGearExport()
+    ns.SaveGearExport("bank")
 end
 
 local function Bank(out)
@@ -407,7 +409,7 @@ end
 local vaultEv, vaultHooked = CreateFrame("Frame"), false
 vaultEv:RegisterEvent("ADDON_LOADED")
 local function VaultSave()
-    if ns.db and not InCombatLockdown() then TW.Guard("vault snapshot", ns.SaveGearExport) end
+    if ns.db and not InCombatLockdown() then TW.Guard("vault snapshot", ns.SaveGearExport, "great vault") end
 end
 local function HookVault()
     if not WeeklyRewardsFrame or vaultHooked then return end
@@ -634,43 +636,156 @@ end
 
 function ns.GearReport() return table.concat(GearLines(), "\n") end
 
+-- TEMP diagnostics (1.3.1): [GEARDIAG] lines in /tw log trace each snapshot
+-- from event to SavedVariables. Remove once the snapshot lifecycle is confirmed.
+local function Diag(fmt, ...) TW.Log("GEARDIAG", fmt, ...) end
+
+-- What a snapshot can see of the character itself. At PLAYER_LOGOUT (so on
+-- /reload too) the game has already let go of spec, gear and action bars.
+local function Health()
+    local h = { equipped = 0, actions = 0, ilvl = 0 }
+    for _, s in ipairs(SLOTS) do
+        if Safe(GetInventoryItemLink, "player", s[1]) then h.equipped = h.equipped + 1 end
+    end
+    local ok, _, ilvl = pcall(GetAverageItemLevel)
+    if ok and Readable(ilvl) and type(ilvl) == "number" then h.ilvl = math.floor(ilvl * 10 + 0.5) / 10 end
+    local spec = GetSpecialization and Safe(GetSpecialization)
+    h.spec = spec and Safe(GetSpecializationInfo, spec) or nil
+    if GetActionInfo then
+        for slot = 1, 180 do
+            local aok, kind = pcall(GetActionInfo, slot)
+            if aok and Readable(kind) and kind then h.actions = h.actions + 1 end
+        end
+    end
+    h.valid = h.equipped > 0 and h.ilvl > 0 and h.spec ~= nil
+    return h
+end
+
+local function HealthText(h)
+    return ("%d/%d slots equipped, ilvl %.1f, spec %s, %d action buttons"):format(h.equipped or 0, #SLOTS,
+        h.ilvl or 0, tostring(h.spec or "none"), h.actions or 0)
+end
+
+local function ExportText(e)
+    if not e then return "no export" end
+    return ("%s export from %s (%s, %s)"):format(e.valid and "complete" or "INCOMPLETE", e.at or "?",
+        e.reason or "reason not recorded", HealthText(e))
+end
+
 -- Too long to copy in one go, so it's saved too: Export-Gear.cmd (in the wow-addons folder) writes it
--- to a text file once WoW has saved it (on /reload or logout).
-function ns.SaveGearExport()
+-- to a text file once WoW has saved it (on /reload or logout). An export that can't see the character
+-- never replaces a complete one: it's noted in gearExportRejected instead.
+function ns.SaveGearExport(reason)
+    reason = reason or "unspecified"
     local lines = GearLines()
-    ns.db.gearExport = { at = date("%Y-%m-%d %H:%M"), lines = lines }
+    local h = Health()
+    local old = ns.db.gearExport
+    Diag("snapshot (%s): %s, %d lines", reason, HealthText(h), #lines)
+    if not h.valid and old and old.valid then
+        ns.db.gearExportRejected = { at = date("%Y-%m-%d %H:%M:%S"), reason = reason, equipped = h.equipped,
+            ilvl = h.ilvl, spec = h.spec, actions = h.actions }
+        Diag("rejected (%s): kept the %s", reason, ExportText(old))
+        return lines, h
+    end
+    ns.db.gearExport = { at = date("%Y-%m-%d %H:%M:%S"), reason = reason, valid = h.valid, equipped = h.equipped,
+        ilvl = h.ilvl, spec = h.spec, actions = h.actions, lines = lines }
+    Diag("%s (%s): replaced the %s", h.valid and "saved" or "saved INCOMPLETE, nothing better to keep", reason,
+        old and ExportText(old) or "no export")
     TW.Log("VAULT", "gear export made (%d lines)", #lines)
-    return lines
+    return lines, h
 end
 
 function ns.ShowGear()
     if InCombatLockdown() then ns.Print("leave combat first.") return end
     TW.Guard("gear export", function()
-        local lines = ns.SaveGearExport()
+        local lines, h = ns.SaveGearExport("/tw gear")
         TW.ShowText("Gear export - paste into ChatGPT", table.concat(lines, "\n"))
-        ns.Print("saved for a file too: /reload (or log out), then run Export-Gear.cmd in your wow-addons folder.")
+        if h.valid then
+            ns.Print("saved for a file too: /reload (or log out), then run Export-Gear.cmd in your wow-addons folder.")
+        else
+            ns.Print("this export is incomplete (" .. HealthText(h) .. "); /tw vault diag for details.")
+        end
     end)
 end
 
--- Logging out (or /reload) saves a fresh export, so Export-Gear.cmd always has
--- what you ended the session with. Switching spec or talents keeps that spec's
--- build for the export's "Other spec" lines.
+-- /tw vault diag: what a snapshot would see right now, and what's saved.
+function ns.GearDiag()
+    ns.Print("now: " .. HealthText(Health()))
+    ns.Print("saved: " .. ExportText(ns.db.gearExport))
+    local r = ns.db.gearExportRejected
+    if r then ns.Print(("last rejected: %s at %s (%s)"):format(r.reason or "?", r.at or "?", HealthText(r))) end
+end
+
+-- Snapshots are taken while the character is loaded: a few seconds after
+-- entering the world (again later if gear or spec isn't readable yet) and
+-- after gear changes. Logout still tries, but can't replace a complete one.
+-- Switching spec or talents keeps that spec's build for the "Other spec" lines.
 local saveEv = CreateFrame("Frame")
 saveEv:RegisterEvent("PLAYER_LOGOUT")
+saveEv:RegisterEvent("PLAYER_ENTERING_WORLD")
+saveEv:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+saveEv:RegisterEvent("PLAYER_REGEN_ENABLED")
 saveEv:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 saveEv:RegisterEvent("TRAIT_CONFIG_UPDATED")
-saveEv:RegisterEvent("PLAYER_ENTERING_WORLD")
-local talentQueued = false
-saveEv:SetScript("OnEvent", function(_, event, unit)
+local talentQueued, snapQueued, loadLogged = false, false, false
+local pendingReason, changedSlots = nil, {}
+
+-- One snapshot at a time; it reads the game when it runs, so a later change is
+-- caught by the one already queued. One retry if it couldn't see the character.
+local function QueueSnapshot(reason, delay)
+    if snapQueued then return end
+    snapQueued = true
+    C_Timer.After(delay, function()
+        snapQueued = false
+        if InCombatLockdown() then
+            pendingReason = reason
+            Diag("snapshot (%s) put off until out of combat", reason)
+            return
+        end
+        if #changedSlots > 0 then
+            Diag("PLAYER_EQUIPMENT_CHANGED slots %s", table.concat(changedSlots, ","))
+            wipe(changedSlots)
+        end
+        TW.Guard("gear snapshot", function()
+            local _, h = ns.SaveGearExport(reason)
+            if not h.valid and not reason:find("retry", 1, true) then QueueSnapshot(reason .. ", retry", 10) end
+        end)
+    end)
+end
+
+local function QueueTalents()
+    if talentQueued then return end
+    talentQueued = true
+    C_Timer.After(3, function()
+        talentQueued = false
+        if not InCombatLockdown() then TW.Guard("talent record", Talents, {}) end
+    end)
+end
+
+saveEv:SetScript("OnEvent", function(_, event, a1, a2)
     if not ns.db then return end
     if event == "PLAYER_LOGOUT" then
-        TW.Guard("logout export", ns.SaveGearExport)
-    elseif event ~= "PLAYER_SPECIALIZATION_CHANGED" or unit == "player" then
-        if talentQueued then return end
-        talentQueued = true
-        C_Timer.After(3, function()
-            talentQueued = false
-            if not InCombatLockdown() then TW.Guard("talent record", Talents, {}) end
-        end)
+        Diag("PLAYER_LOGOUT: %s", HealthText(Health()))
+        TW.Guard("logout export", ns.SaveGearExport, "logout")
+        Diag("SavedVariables will hold the %s", ExportText(ns.db.gearExport))
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        if not loadLogged then
+            loadLogged = true
+            Diag("loaded from SavedVariables: %s", ExportText(ns.db.gearExport))
+        end
+        Diag("PLAYER_ENTERING_WORLD (login %s, reload %s): %s", tostring(a1), tostring(a2), HealthText(Health()))
+        QueueSnapshot("entering world", 5)
+        QueueTalents()
+    elseif event == "PLAYER_EQUIPMENT_CHANGED" then
+        changedSlots[#changedSlots + 1] = tostring(a1)
+        QueueSnapshot("gear changed", 2)
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        if pendingReason then
+            local r = pendingReason
+            pendingReason = nil
+            QueueSnapshot(r .. ", after combat", 2)
+        end
+    elseif event ~= "PLAYER_SPECIALIZATION_CHANGED" or a1 == "player" then
+        QueueTalents()
     end
 end)

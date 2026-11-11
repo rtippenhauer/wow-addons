@@ -6,7 +6,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.3.0"
+ns.VERSION = "1.3.1"
 ns.WIDTH = 350
 ns.Print = TW.Printer("Vault")
 ns.Log = TW.Log
@@ -93,6 +93,7 @@ local function Command(rest)
     elseif sub == "weekly" or sub == "bountiful" then Toggle(true, sub)
     elseif sub == "stash" then StashReport()
     elseif sub == "gear" then ns.ShowGear()
+    elseif sub == "diag" then ns.GearDiag()
     else TW.ModuleHelp(module) end
 end
 
@@ -106,6 +107,7 @@ module = TW.Register({
         { "bountiful", "open the Bountiful tab (today's Bountiful Delves)" },
         { "stash", "show where the game reports the Gilded Stash count" },
         { "gear", "gear export: spec, gear, bags, bank gear, vault, currencies as text for ChatGPT" },
+        { "diag", "gear export check: what a snapshot sees now and what's saved (temporary)" },
     },
 })
 -- /tw weekly and /tw bountiful: open that tab.
