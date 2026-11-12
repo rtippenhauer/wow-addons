@@ -7,7 +7,7 @@ local TW = TippWorks
 
 -- The running version. WoW only re-reads the .toc on a full restart, so the
 -- number lives here too. Bump both together.
-ns.VERSION = "1.0.16"
+ns.VERSION = "1.1.0"
 ns.Log, ns.Guard, ns.Print = TW.Log, TW.Guard, TW.Printer("Curios")
 
 -- Delve pickups tracked on the panel (matched against map marker names,
@@ -902,6 +902,107 @@ local function UnitIsDundun(unit, why)
 end
 ns.UnitIsDundun = UnitIsDundun
 
+---------------------------------------------------------------------------
+-- Valeera's Agony (NPC 259126): Valeera summons it now and then (Scar of
+-- Kathra'natir). It starts a 12s Dissipate cast at once and has ~80k health
+-- (combat logs, Nov 8 2026). Its name is hidden from addons in delves, so a
+-- key press finds it: the Agony button / key binding targets it, puts a skull
+-- on it and casts an instant spell (mage, priest). The warning comes from its
+-- Dissipate cast, when the game lets addons read that.
+---------------------------------------------------------------------------
+local AGONY_NAME, AGONY_CAST = "Valeera's Agony", 1279148
+local AGONY_BINDING = "CLICK TippWorksCuriosAgonyButton:LeftButton"
+local AGONY_SPELL = {
+    MAGE = "[spec:1,@target,harm,nodead] Arcane Barrage; [spec:2,@target,harm,nodead] Fire Blast; [@target,harm,nodead] Ice Lance",
+    PRIEST = "[spec:2,@target,harm,nodead] Holy Word: Chastise; [@target,harm,nodead] Shadow Word: Pain",
+}
+local agonyBtn, agonyPending, agonyHidden, lastAgony = nil, nil, false, 0
+
+local function AgonyMacro()
+    local _, class = UnitClass("player")
+    local m = "/cleartarget\n/targetexact " .. AGONY_NAME .. "\n/stopmacro [noexists]\n"
+        .. "/tm [@target,exists,nodead] 0\n/tm [@target,exists,nodead] 8"
+    if AGONY_SPELL[class] then m = m .. "\n/cast " .. AGONY_SPELL[class] end
+    return m
+end
+
+-- The on-screen button shows in delves; secure buttons can't be shown or hidden in combat.
+function ns.AgonyShow(show)
+    if not agonyBtn then return end
+    if InCombatLockdown() then agonyPending = show return end
+    agonyPending = nil
+    agonyBtn:SetShown(show and db.agonyButton ~= false)
+end
+
+function ns.ApplyPendingAgony()
+    if agonyPending ~= nil then ns.AgonyShow(agonyPending) end
+end
+
+local function AgonyKey()
+    local key = GetBindingKey(AGONY_BINDING)
+    return key and GetBindingText(key) or nil
+end
+
+local function InitAgony()
+    local b = CreateFrame("Button", "TippWorksCuriosAgonyButton", UIParent, "SecureActionButtonTemplate")
+    b:SetSize(40, 40)
+    local p = db.agonyPos
+    if p then b:SetPoint(p[1], UIParent, p[2], p[3], p[4]) else b:SetPoint("CENTER", UIParent, "CENTER", 0, 200) end
+    local icon = C_Spell and C_Spell.GetSpellTexture and Safe(C_Spell.GetSpellTexture, 1279084)
+    b:SetNormalTexture(Readable(icon) and icon or "Interface\\Icons\\Spell_Shadow_AntiShadow")
+    b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    b.label = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    b.label:SetPoint("TOP", b, "BOTTOM", 0, -2)
+    b.label:SetText("Agony")
+    b:RegisterForClicks("AnyUp", "AnyDown")
+    b:SetAttribute("type", "macro")
+    b:SetAttribute("macrotext", AgonyMacro())
+    b:SetMovable(true)
+    b:RegisterForDrag("LeftButton")
+    b:SetScript("OnDragStart", function(self)
+        if IsShiftKeyDown() and not InCombatLockdown() then self:StartMoving() end
+    end)
+    b:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local a, _, rel, x, y = self:GetPoint()
+        db.agonyPos = { a, rel, x, y }
+    end)
+    b:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(AGONY_NAME)
+        GameTooltip:AddLine("Click: target it, put a skull on it and hit it with an instant spell (mage, priest)."
+            .. " If it isn't nearby, your target is cleared.", 1, 1, 1, true)
+        local key = AgonyKey()
+        GameTooltip:AddLine(key and ("Key: " .. key) or "Set a key: Options > Keybindings > AddOns > Tippenhauer Works - Curiosities.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("Shift-drag to move. /tw curios agony off hides it.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    b:Hide()
+    agonyBtn = b
+end
+
+BINDING_HEADER_TIPPWORKSCURIOS = "Tippenhauer Works - Curiosities"
+_G["BINDING_NAME_" .. AGONY_BINDING] = "Valeera's Agony: target + skull + instant spell"
+
+-- UNIT_SPELLCAST_START: the Agony starts Dissipate as soon as it appears.
+local function AgonyCast(unit, spellID)
+    if not inDelve or type(unit) ~= "string" or not (unit:find("^nameplate") or unit == "target" or unit == "focus") then return end
+    if not Readable(spellID) then
+        if not agonyHidden then
+            agonyHidden = true
+            ns.Log("AGONY", "enemy spell casts are hidden from addons here - no Agony warning, use the Agony button or key")
+        end
+        return
+    end
+    if spellID ~= AGONY_CAST or GetTime() - lastAgony < 5 then return end
+    lastAgony = GetTime()
+    local key = AgonyKey()
+    ns.Log("AGONY", "Valeera's Agony is casting Dissipate (seen on %s)", unit)
+    Alert("|cffb048f8Valeera's Agony!|r " .. (key and ("Press " .. key) or "Click the Agony button") .. " to target and hit it.",
+        "|cffb048f8Valeera's Agony!|r")
+end
+
 function ns.ApplyPendingDundun()
     local p = pendingDundun
     pendingDundun = nil
@@ -1208,6 +1309,7 @@ local function Enter(fresh)
     StartRunIfNeeded(fresh)
     DropLabyrinthGhosts()
     ns.ApplyPendingDundun()
+    ns.AgonyShow(true)
     if not frame:IsShown() then frame:Show() end
     Broadcast("H|" .. ns.VERSION)
     ns.RefreshCurios()
@@ -1219,6 +1321,7 @@ local function Leave()
     if run then run.left = true end
     inDelve, wasInDelve = false, false
     frame:Hide(); wipe(addonUsers); ClearArrow()
+    ns.AgonyShow(false)
 end
 
 local lastAsk = 0
@@ -1306,6 +1409,7 @@ end
 function ns.InitCurios()
     C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
     CreatePanel()
+    InitAgony()
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
     ev:RegisterEvent("CHAT_MSG_ADDON")
     ev:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -1316,7 +1420,7 @@ function ns.InitCurios()
     for _, e in ipairs({ "CHAT_MSG_RAID_BOSS_EMOTE", "CHAT_MSG_RAID_BOSS_WHISPER", "CHAT_MSG_MONSTER_SAY",
         "CHAT_MSG_MONSTER_YELL", "CHAT_MSG_MONSTER_WHISPER", "CHAT_MSG_MONSTER_EMOTE", "CHAT_MSG_SYSTEM",
         "RAID_BOSS_EMOTE", "RAID_BOSS_WHISPER", "UI_INFO_MESSAGE", "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT",
-        "NAME_PLATE_UNIT_ADDED" }) do ev:RegisterEvent(e) end
+        "NAME_PLATE_UNIT_ADDED", "UNIT_SPELLCAST_START" }) do ev:RegisterEvent(e) end
     ev:SetScript("OnEvent", function(_, event, ...)
         if event == "PLAYER_ENTERING_WORLD" then
             local _, isReload = ...
@@ -1327,7 +1431,11 @@ function ns.InitCurios()
             wasInDelve = inDelve
         elseif event == "CHAT_MSG_ADDON" then
             OnAddonMessage(...)
+        elseif event == "UNIT_SPELLCAST_START" then
+            local unit, _, spellID = ...
+            ns.Guard("agony cast", AgonyCast, unit, spellID)
         elseif event == "PLAYER_REGEN_ENABLED" then
+            ns.ApplyPendingAgony()
             Flush()
         elseif event == "LOOT_OPENED" and inDelve then
             ns.Guard("curio loot", OnLootOpened)
@@ -1426,6 +1534,13 @@ local function Command(rest)
         if v == "on" then db[sub] = nil elseif v == "off" then db[sub] = false end
         ns.Print(("Dundun %s: %s"):format(sub == "alert" and "on-screen alert" or "alert sound",
             db[sub] == false and "OFF" or "ON") .. ((v ~= "on" and v ~= "off") and ("  (/tw curios " .. sub .. " on|off)") or ""))
+    elseif sub == "agony" then
+        local v = (arg or ""):lower()
+        if v == "on" then db.agonyButton = nil elseif v == "off" then db.agonyButton = false end
+        ns.AgonyShow(inDelve)
+        local key = AgonyKey()
+        ns.Print(("Valeera's Agony button in delves: %s; key: %s"):format(db.agonyButton == false and "OFF" or "ON",
+            key or "none (Options > Keybindings > AddOns)") .. ((v ~= "on" and v ~= "off") and "  (/tw curios agony on|off)" or ""))
     elseif sub == "testalert" then
         Alert("|cffff8000Test:|r this is how the Dundun alert looks and sounds.", "|cffff8000Dundun alert test|r")
     elseif sub == "dundun" then
@@ -1456,6 +1571,7 @@ module = TW.Register({
         { "arrow auto|tomtom|own|both", "which guide arrow a row click uses" },
         { "dundun", "point the arrow at Dundun again (once he's been spotted)" },
         { "testalert", "show and play the Dundun alert now, to check it" },
+        { "agony on|off", "Valeera's Agony button in delves (target, skull, instant spell; also a key binding)" },
         { "alert on|off", "Dundun on-screen alert (default on)" },
         { "sound on|off", "Dundun alert sound (default on)" },
     },

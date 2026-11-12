@@ -18,6 +18,12 @@ also tracks who has picked up which one.
   follows him as he moves. His "hiding" announcement also triggers the warning. The alert and the
   sound are separate settings, both on by default. To target and mark him, use Deep Delve's
   "Find and mark Dundun" key binding.
+- **Valeera's Agony:** when Valeera is your companion she sometimes summons Valeera's Agony (about
+  80k health, it starts a 12-second cast at once). The **Agony** button (shown in delves; shift-drag to move)
+  or its key binding (Options > Keybindings > AddOns > Tippenhauer Works - Curiosities) targets it, puts a
+  skull on it and casts an instant spell: Ice Lance, Fire Blast or Arcane Barrage for a mage, Holy Word:
+  Chastise (Holy) or Shadow Word: Pain for a priest. Other classes get the target and skull. If no Agony is
+  nearby, your target is cleared. When the game lets addons see its cast, you also get an on-screen warning.
 - **Game count:** the footer also shows "(game: N)". That's the game's own count of curiosities
   you've collected this run, read from a hidden currency.
 - **Party sync:** party members running this addon share finds and pickups automatically.
@@ -41,6 +47,7 @@ time you enter a delve; a `/reload` inside the delve keeps the current list.
 | `/tw curios dundun` | Point the arrow at Dundun again |
 | `/tw curios alert on` / `off` | Dundun on-screen warning (on by default) |
 | `/tw curios sound on` / `off` | Dundun alert sound (on by default) |
+| `/tw curios agony on` / `off` | The Valeera's Agony button in delves (on by default) |
 | `/tw settings` | Options → AddOns → Tippenhauer Works → Curiosities |
 
 You can also open the panel from the Tippenhauer Works minimap button or the AddOns menu.
